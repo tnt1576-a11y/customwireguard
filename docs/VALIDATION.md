@@ -281,8 +281,32 @@ can retry after interruption. Ten offline fixtures passed PowerShell 7 and
 Windows PowerShell 5.1, including renamed-adapter restoration, an exception
 after detachment took effect, diagnosis/routing failures, and failed restoration
 with saved-state recovery. The actual binding has not been changed by the
-assistant. The real comparison is pending; local filtering and upstream DPI
-remain hypotheses, not established causes.
+assistant. The user has now completed the real comparison. All three phases
+passed 23/23 private/public pings, both DNS checks and three HTTPS requests each;
+every IP check showed the configured server. This includes the initial phase
+before any binding change. Hash correlation matched 524/524, 548/548 and 484/484
+outbound packets. Return matches were 490/490, 507/508 and 455/458; all four
+unmatched return packets were within 0.17 seconds before or 0.1 seconds after
+the final client trace record. Each traced association lasted about 29-31
+seconds. No exact zero-loss or long-term reliability claim follows. All copies
+of client.json and the native Full configuration matched the original bytes.
+The filter was verified enabled again, no recovery state remained and all CWG
+tunnels were stopped. Server restarts/errors remained zero and rejects did not
+increase. The severe failure did not reproduce, so this comparison does not
+identify WireSock as the cause or conclusively exclude intermittent filtering.
+
+With the current IPv4-only profile, all successful comparisons used packet
+tracing, unlike the failed normal run. Tracing writes synchronously under a
+mutex and can change timing. Configuration-directory differences also remained
+between those runs. Compare-ClientTracing.ps1 now prepares four user-run phases
+(off/on/off/on), keeping the original bundle path and native configuration fixed.
+It changes no network bindings, uses the same diagnostics, preserves prior and
+per-phase evidence, and stops each tunnel. Six offline cases passed PowerShell 7
+and Windows PowerShell 5.1, covering flag order, same-path startup, failed/partial
+startup cleanup, diagnosis/launch failure, pending filter recovery and evidence
+preservation after a cleanup error. No actual client run has been performed by
+the assistant. The real tracing comparison is pending. A fresh UDP flow per
+startup and background/network variability can still affect results.
 
 ## Not verified here
 

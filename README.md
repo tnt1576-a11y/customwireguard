@@ -155,6 +155,18 @@ before the change; `-RestoreOnly` retries filter restoration after interruption.
 The helper identifies the adapter by GUID and changes only the WireSock binding.
 This tests a possible local cause; the filter's presence is not evidence of fault.
 
+The completed filter comparison passed with the filter attached, detached and
+restored; it did not reproduce the failure. With the current IPv4-only profile,
+successful diagnostic runs enabled packet tracing while the failed normal run
+did not. This is a correlation, not a confirmed workaround. The user-run
+`scripts/Compare-ClientTracing.ps1 -Bundle PATH` isolates it with four Full runs
+(tracing off/on/off/on) using the same original configuration and bundle path.
+It changes no bindings, stops each tunnel, and archives previous/per-run logs
+in the private bundle. Packet tracing performs synchronous file writes and can
+alter scheduling; no transport timing change is justified until this comparison
+has been run. Each startup also creates a fresh UDP flow, so network variability
+remains a possible confounder.
+
 ## Transport settings and limits
 
 For a size-dependent path investigation, `probe` also accepts a bounded list of
