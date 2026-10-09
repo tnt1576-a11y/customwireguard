@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"net"
 	"net/netip"
@@ -28,7 +29,8 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 		return err
 	}
 	key, _ := cfg.Secret()
-	bootstrap, err := wire.NewCodec(key, nil, false)
+	exchange := cfg.Transport == "exchange"
+	bootstrap, err := codecForMode(key, nil, false, exchange)
 	if err != nil {
 		conn.Close()
 		return err
@@ -48,6 +50,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 	pacer := newPacketPacer(cfg, conn, stats)
 	defer pacer.reset()
 	var active, pending *association
+	downstream := exchangeQueue{stats: stats}
 	bootstrapLimit := bucket{rate: 100, burst: 200}
 	welcomeLimit := bucket{rate: 2, burst: 4}
 	pingLimit := bucket{rate: float64(rate), burst: float64(rate) * 1.5}
@@ -80,8 +83,9 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 			}
 			if !ok && pending != nil && now.Sub(pending.created) < 15*time.Second {
 				f, ok, newest = pending.open(p.data, now)
-				if ok && (f.Kind == wire.Data || f.Kind == wire.Ping) {
+				if ok && (f.Kind == wire.Data || f.Kind == wire.Ping || f.Kind == wire.Exchange) {
 					pacer.reset()
+					downstream.clear()
 					active, pending = pending, nil
 					a = active
 					stats.Established.Add(1)
@@ -98,6 +102,29 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 					a.addr = p.addr
 				}
 				switch f.Kind {
+				case wire.Exchange:
+					stats.ExchangeRequests.Add(1)
+					if len(f.Payload) > 0 && send(backend, zeroAddr, f.Payload, stats) {
+						stats.Received.Add(1)
+					}
+					payload := downstream.pop(now)
+					reply := make([]byte, 9+len(payload))
+					binary.BigEndian.PutUint64(reply[:8], f.Sequence)
+					if len(downstream.items) > 0 {
+						reply[8] = 1
+					}
+					copy(reply[9:], payload)
+					out, e := a.sealSized(wire.ExchangeReply, reply, len(p.data), now)
+					// Exactly one same-size reply, to this request's source. Even
+					// reordered requests never use a different cached destination.
+					if e == nil && send(conn, p.addr, out, stats) {
+						stats.ExchangeReplies.Add(1)
+						if len(payload) > 0 {
+							stats.Sent.Add(1)
+						} else {
+							stats.ExchangeEmpty.Add(1)
+						}
+					}
 				case wire.Data:
 					if send(backend, zeroAddr, f.Payload, stats) {
 						stats.Received.Add(1)
@@ -166,7 +193,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 			} else {
 				token := make([]byte, 32)
 				rand.Read(token)
-				pending, err = newAssociation(key, f.ID, token, false, now)
+				pending, err = newAssociationMode(key, f.ID, token, false, now, exchange)
 				if err != nil {
 					return err
 				}
@@ -184,6 +211,14 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 		case p := <-channels[1]:
 			now := time.Now()
 			if active == nil || now.Sub(active.lastSeen) >= 3*time.Minute {
+				continue
+			}
+			if exchange {
+				if len(p.data) == 0 || len(p.data) > wire.ExchangeMaxPayload {
+					stats.Oversize.Add(1)
+				} else {
+					downstream.push(p.data, now)
+				}
 				continue
 			}
 			out, e := active.seal(wire.Data, p.data, cfg.Profile, now)

@@ -453,6 +453,30 @@ and 5.1. The client now displays its configured sending limit; the Full-mode
 diagnostic retains process exit codes on PS5.1. Actual target-network stability
 with pacing remains unverified until the user runs the new client.
 
+The user completed that test: of 871 outer client writes, 382 appeared at both
+the server NIC and socket. In the aligned test window, all 564 server writes
+appeared at its NIC and 225 at the client socket. That is 56.1% upload and 60.1%
+return loss. Both peers reported zero pacing/receive-queue drops, socket errors,
+oversize packets or rejected packets. The first unmatched client write occurred
+1.311 seconds after its first write. Loss continued throughout the session;
+one direct-IP HTTPS request succeeded while the others failed. There was no
+complete persistent disconnect or observed explanation based solely on the QUIC
+fixed bit in random raw payloads. Server capture reported zero kernel drops.
+These measurements still do not isolate local filtering from network filtering.
+
+## Request/reply experiment (0.4.0)
+
+Based on successful probe traffic, the next mode removes unsolicited server
+data transmissions and correlates one same-sized authenticated response with
+each client request. See [the protocol and costs](EXCHANGE.md). It retains
+standard cryptography while separating its keys and encrypted version from raw
+v1. Focused tests cover tamper/truncation/reflection and cross-version rejection,
+response-only behavior, replay rejection, bounded/expired queues, malformed
+frames, request correlation and response destinations after reordering/migration.
+Real WireGuard IPv4/IPv6 at 1280-byte MTU passed over localhost in both directions.
+Seventeen offline startup fixtures passed PowerShell 7 and 5.1, including the
+native MTU guard. Target-network effectiveness remains user-run and unverified.
+
 ## Not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,

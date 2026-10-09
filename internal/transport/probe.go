@@ -49,7 +49,7 @@ func ProbeEndpoint(ctx context.Context, cfg config.Config, count int, sizes ...i
 		}
 	}
 	key, _ := cfg.Secret()
-	codec, err := wire.NewCodec(key, nil, true)
+	codec, err := codecForMode(key, nil, true, cfg.Transport == "exchange")
 	if err != nil {
 		return result, err
 	}

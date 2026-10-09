@@ -16,17 +16,21 @@ import (
 )
 
 const (
-	Hello       byte = 1
-	Welcome     byte = 2
-	Data        byte = 3
-	Ping        byte = 4
-	Pong        byte = 5
-	Probe       byte = 6
-	ProbeReply  byte = 7
-	HeaderSize       = 36
-	Overhead         = chacha20poly1305.NonceSizeX + chacha20poly1305.Overhead + HeaderSize
-	MaxDatagram      = 1440
-	MaxPayload       = MaxDatagram - Overhead
+	Hello              byte = 1
+	Welcome            byte = 2
+	Data               byte = 3
+	Ping               byte = 4
+	Pong               byte = 5
+	Probe              byte = 6
+	ProbeReply         byte = 7
+	Exchange           byte = 8
+	ExchangeReply      byte = 9
+	ExchangeMaxPayload      = 1312 // native WireGuard at a 1280-byte tunnel MTU
+	ExchangeMinSize         = 1400 // room for payload + 9-byte reply metadata + AEAD
+	HeaderSize              = 36
+	Overhead                = chacha20poly1305.NonceSizeX + chacha20poly1305.Overhead + HeaderSize
+	MaxDatagram             = 1440
+	MaxPayload              = MaxDatagram - Overhead
 )
 
 var ErrPacket = errors.New("invalid or unauthenticated datagram")
@@ -48,19 +52,30 @@ type Frame struct {
 }
 
 type Codec struct {
-	tx cipher.AEAD
-	rx cipher.AEAD
+	tx      cipher.AEAD
+	rx      cipher.AEAD
+	version byte
 }
 
 // NewCodec derives independent keys for directions and for bootstrap/session use.
 // Session material is a fresh 16-byte client ID followed by a 32-byte server token.
 func NewCodec(key []byte, material []byte, client bool) (*Codec, error) {
+	return newCodec(key, material, client, 1)
+}
+
+// NewExchangeCodec separates the request/reply protocol from legacy raw peers
+// cryptographically, including its preflight and bootstrap packets.
+func NewExchangeCodec(key []byte, material []byte, client bool) (*Codec, error) {
+	return newCodec(key, material, client, 2)
+}
+
+func newCodec(key []byte, material []byte, client bool, version byte) (*Codec, error) {
 	if len(key) != 32 || (len(material) != 0 && len(material) != 48) {
 		return nil, errors.New("expected a 32-byte key and either no material or 48-byte session material")
 	}
-	domain := "customwireguard/v1/bootstrap/"
+	domain := fmt.Sprintf("customwireguard/v%d/bootstrap/", version)
 	if len(material) != 0 {
-		domain = "customwireguard/v1/session/"
+		domain = fmt.Sprintf("customwireguard/v%d/session/", version)
 	}
 	makeAEAD := func(direction string) (cipher.AEAD, error) {
 		derived, err := hkdf.Key(sha256.New, key, material, domain+direction, 32)
@@ -78,19 +93,26 @@ func NewCodec(key []byte, material []byte, client bool) (*Codec, error) {
 		return nil, err
 	}
 	if client {
-		return &Codec{tx: c2s, rx: s2c}, nil
+		return &Codec{tx: c2s, rx: s2c, version: version}, nil
 	}
-	return &Codec{tx: s2c, rx: c2s}, nil
+	return &Codec{tx: s2c, rx: c2s, version: version}, nil
+}
+
+func (c *Codec) maxKind() byte {
+	if c.version == 2 {
+		return ExchangeReply
+	}
+	return ProbeReply
 }
 
 func (c *Codec) Seal(f Frame, size int) ([]byte, error) {
-	if size < Overhead+len(f.Payload) || size > MaxDatagram || f.Kind < Hello || f.Kind > ProbeReply {
+	if size < Overhead+len(f.Payload) || size > MaxDatagram || f.Kind < Hello || f.Kind > c.maxKind() {
 		return nil, fmt.Errorf("frame exceeds datagram budget or has invalid type")
 	}
 	nonce := make([]byte, chacha20poly1305.NonceSizeX, size)
 	rand.Read(nonce)
 	plain := make([]byte, size-chacha20poly1305.NonceSizeX-chacha20poly1305.Overhead)
-	plain[0], plain[1] = 1, f.Kind
+	plain[0], plain[1] = c.version, f.Kind
 	binary.BigEndian.PutUint64(plain[2:10], uint64(f.Timestamp))
 	copy(plain[10:26], f.ID[:])
 	binary.BigEndian.PutUint64(plain[26:34], f.Sequence)
@@ -110,7 +132,7 @@ func (c *Codec) Open(packet []byte, now time.Time) (Frame, error) {
 	if err != nil || len(plain) < HeaderSize {
 		return f, ErrPacket
 	}
-	if plain[0] != 1 || plain[1] < Hello || plain[1] > ProbeReply {
+	if plain[0] != c.version || plain[1] < Hello || plain[1] > c.maxKind() {
 		return f, ErrPacket
 	}
 	ts := int64(binary.BigEndian.Uint64(plain[2:10]))

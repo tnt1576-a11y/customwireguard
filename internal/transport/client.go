@@ -15,6 +15,9 @@ var zeroAddr netip.AddrPort
 // RunClient owns local and remote. All state changes take place in one event
 // loop; local packets are only accepted from the configured WireGuard port.
 func RunClient(ctx context.Context, local, remote *net.UDPConn, cfg config.Config, stats *Stats) error {
+	if cfg.Transport == "exchange" {
+		return runExchangeClient(ctx, local, remote, cfg, stats)
+	}
 	if err := cfg.Validate("client"); err != nil {
 		local.Close()
 		remote.Close()

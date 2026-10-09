@@ -89,6 +89,40 @@ func TestRawPacingValidation(t *testing.T) {
 	}
 }
 
+func TestExchangeConfigValidation(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if e := Initialize(dir, "192.0.2.10:443", "balanced"); e != nil {
+		t.Fatal(e)
+	}
+	c, e := Load(filepath.Join(dir, "client.json"), "client")
+	if e != nil {
+		t.Fatal(e)
+	}
+	c.Transport = "exchange"
+	for _, rate := range []int{0, 10, 100, 200} {
+		c.ExchangePPS = rate
+		if e = c.Validate("client"); e != nil {
+			t.Fatal(e)
+		}
+	}
+	for _, rate := range []int{-1, 1, 201} {
+		c.ExchangePPS = rate
+		if c.Validate("client") == nil {
+			t.Fatal("bad exchange rate accepted")
+		}
+	}
+	c.ExchangePPS = 100
+	c.PaceKbps = 1000
+	if c.Validate("client") == nil {
+		t.Fatal("mixed pacing accepted")
+	}
+	c.PaceKbps = 0
+	c.Transport = "raw"
+	if c.Validate("client") == nil {
+		t.Fatal("exchange setting accepted in raw mode")
+	}
+}
+
 func TestH3ConfigurationAndRelativePin(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bundle")
 	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {

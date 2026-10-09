@@ -86,5 +86,17 @@ try {
         } elseif (-not $failed -or $global:CwgArguments.Count -or $global:CwgRouteCreated -or (Test-Path -LiteralPath $statePath)) { throw ('H3 failed to reject unsafe native profile: ' + $case) }
         Write-Host ('PASS: ' + $case)
     }
+    Set-Content -LiteralPath (Join-Path $fixture 'client.json') -Value '{"endpoint":"203.0.113.1:443","transport":"exchange","exchange_pps":100}'
+    foreach ($case in @('Exchange-valid','Exchange-oversize','Exchange-missing','Exchange-duplicate')) {
+        $global:CwgCase=$case; $global:CwgArguments=@(); $global:CwgPhysical=$true; $global:CwgExisting=$false; $global:CwgRouteCreated=$false
+        $mtu= switch($case) {'Exchange-valid' {"MTU = 1088"};'Exchange-oversize' {"MTU = 1281"};'Exchange-duplicate' {"MTU = 1088`nMTU = 1280"};default {''}}
+        Set-Content -LiteralPath (Join-Path $fixture 'cwg-full.conf') -Value "[Interface]`n$mtu`nAddress = 10.77.0.2/32`n[Peer]`nAllowedIPs = 0.0.0.0/1, 128.0.0.0/1"
+        if(Test-Path -LiteralPath $statePath){Remove-Item -LiteralPath $statePath}
+        $failed=$false
+        try {& (Join-Path $fixture 'Start-Client.ps1') -Bundle $fixture -Mode Full -Executable (Join-Path $fixture 'fake-cwg.ps1') | Out-Null} catch {if($case -eq 'Exchange-valid'){throw};$failed=$true}
+        if($case -eq 'Exchange-valid') {if(-not $global:CwgArguments.Count -or -not $global:CwgRouteCreated){throw 'Exchange start did not run'}}
+        elseif(-not $failed -or $global:CwgArguments.Count -or $global:CwgRouteCreated -or (Test-Path -LiteralPath $statePath)){throw ('Exchange MTU guard failed: '+$case)}
+        Write-Host ('PASS: '+$case)
+    }
 } finally { $env:ProgramFiles=$originalProgramFiles }
-Write-Host 'Thirteen offline routing helper cases passed. No network or system state changed.'
+Write-Host 'Seventeen offline routing helper cases passed. No network or system state changed.'

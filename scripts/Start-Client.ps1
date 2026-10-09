@@ -28,6 +28,14 @@ if ($cfg.transport -eq 'h3') {
         throw 'HTTP/3 comparison requires MTU = 1088 and IPv4-only Address/AllowedIPs in the native WireGuard profile.'
     }
     Write-Host 'Transport: HTTP/3 CONNECT-UDP with pinned TLS. The preflight verifies HTTP/3 access only.'
+} elseif ($cfg.transport -eq 'exchange') {
+    $nativeText = Get-Content -LiteralPath $tunnelPath -Raw
+    $mtuLines = [regex]::Matches($nativeText,'(?m)^\s*MTU\s*=\s*(\d+)\s*(?:#.*)?$')
+    if ($mtuLines.Count -ne 1 -or [int]$mtuLines[0].Groups[1].Value -lt 576 -or [int]$mtuLines[0].Groups[1].Value -gt 1280) {
+        throw 'Request/reply UDP requires one explicit native WireGuard MTU between 576 and 1280.'
+    }
+    $pollRate = if ($cfg.exchange_pps) { $cfg.exchange_pps } else { 100 }
+    Write-Host ('Transport: encrypted UDP request/reply; active polling target '+$pollRate+'/s. Polling adds bandwidth overhead.')
 } elseif ($cfg.pace_kbps -gt 0) {
     Write-Host ('Transport: encrypted UDP; client sending limit '+$cfg.pace_kbps+' kbit/s. The server controls its own sending limit.')
 }

@@ -34,6 +34,9 @@ def main():
     exe = Path(sys.argv[1]).resolve(strict=True)
     interface_args = ['-interface-index', str(int(sys.argv[2]))] if len(sys.argv) > 2 else []
     pace = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    transport = sys.argv[4] if len(sys.argv) > 4 else 'raw'
+    assert transport in ('raw', 'exchange') and not (pace and transport == 'exchange')
+    sizes = (32, 148, 1280, 1312 if transport == 'exchange' else 1364)
     processes = []
     sockets = []
     failed = True
@@ -50,6 +53,9 @@ def main():
             client['listen'], client['wireguard'] = client_address, address(wg)
             server['listen'], server['wireguard'] = server_address, address(backend)
             for name, cfg in [('client', client), ('server', server)]:
+                cfg['transport'] = transport
+                if transport == 'exchange':
+                    cfg['exchange_pps'] = 100
                 if pace:
                     cfg['pace_kbps'], cfg['pace_queue_ms'] = pace, 150
                 (bundle / f'{name}.json').write_text(json.dumps(cfg))
@@ -67,7 +73,7 @@ def main():
             ready = json.loads(run(exe, 'probe', '-config', str(bundle / 'client.json'), '-count', '2'))
             assert ready['received'] >= 1, 'Server did not become ready'
             target_host, target_port = client_address.rsplit(':', 1)
-            for size in (32, 148, 1280, 1364):
+            for size in sizes:
                 original = secrets.token_bytes(size)
                 wg.sendto(original, (target_host, int(target_port)))
                 received, peer = backend.recvfrom(65535)
@@ -82,7 +88,7 @@ def main():
             wg.sendto(original, (target_host, int(target_port)))
             assert backend.recvfrom(65535)[0] == original, 'Probe disrupted live association'
             burst_elapsed = {}
-            if pace:
+            if pace or transport == 'exchange':
                 # Burst traffic must be delivered intact and actually spaced in
                 # both directions. These are temporary localhost UDP sockets.
                 messages = [i.to_bytes(2, 'big') + secrets.token_bytes(1198) for i in range(10)]
@@ -100,7 +106,7 @@ def main():
                             first = now
                         assert got == message, f'{direction} burst changed, reordered or lost data'
                     elapsed = time.monotonic() - first
-                    minimum = (len(messages)-1) * (1200+48) * 8 / (pace*1000)
+                    minimum = (len(messages)-1) * (1200+48) * 8 / (pace*1000) if pace else (len(messages)-1)/100
                     assert elapsed >= minimum * 0.75, f'{direction} pacing not applied: {elapsed}'
                     burst_elapsed[direction] = round(elapsed, 4)
             attacker = udp()
@@ -124,7 +130,7 @@ def main():
             assert hashes('client', 'read', 'local', client_address) <= hashes('server', 'write', 'remote', address(backend)), 'Native upload trace mismatch'
             assert hashes('client', 'write', 'local', client_address) <= hashes('server', 'read', 'remote', address(backend)), 'Native download trace mismatch'
             assert hashlib.sha256(original).hexdigest() in hashes('client', 'read', 'local', client_address), 'Missing known test packet in trace'
-            print(json.dumps({'exact_executable': str(exe), 'roundtrip_sizes': [32, 148, 1280, 1364],
+            print(json.dumps({'exact_executable': str(exe), 'transport': transport, 'roundtrip_sizes': sizes,
                               'probe': result, 'unauthenticated_silence': True,
                               'live_session_preserved': True, 'socket_traces_correlated': True,
                               'pace_kbps': pace, 'burst_seconds': burst_elapsed,

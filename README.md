@@ -1,8 +1,12 @@
 # CWG: experimental UDP transport for WireGuard
 
-The current research path is an **encrypted UDP carrier with optional outbound
-pacing**. It carries complete native WireGuard datagrams and remains UDP-only;
-there is no TCP fallback. The earlier [HTTP/3 experiment](docs/HTTP3.md) remains
+The current research path is a **client-driven encrypted UDP request/reply
+carrier**. It carries complete native WireGuard datagrams and remains UDP-only;
+there is no TCP fallback. Each authenticated request permits one same-sized
+response; the server queues return traffic until the client requests it.
+See [request/reply mode and its bandwidth cost](docs/EXCHANGE.md).
+The original raw carrier and its pacing option remain available for comparison.
+The earlier [HTTP/3 experiment](docs/HTTP3.md) remains
 available for reference, but failed preflight on the target network on both
 tested ports. Work on that path has stopped at the user's request.
 
@@ -38,6 +42,8 @@ audit and is not a drop-in replacement for a mature VPN product.
   client after changing network adapters; this does not provide a kill switch.
 - Tests with real WireGuard implementations and loopback UDP sockets, including
   IPv4/IPv6 packets in both directions at a 1280-byte tunnel MTU.
+- Version-separated request/reply mode, bounded queues and outstanding requests,
+  idle/active polling, per-request response correlation and timeout counters.
 
 One server process/outer secret serves **one active client**. Additional clients
 need separate instances, ports, WireGuard configurations and secrets. Starting a

@@ -18,7 +18,7 @@ import (
 	"customwireguard/internal/transport"
 )
 
-var version = "0.3.0-dev"
+var version = "0.4.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -121,6 +121,9 @@ func run(args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	if cfg.Transport == "exchange" && (command == "session-probe" || command == "replay-probe" || *probeRate != 20) {
+		return errors.New("raw session/replay diagnostics are not supported by exchange transport")
+	}
 	if cfg.Transport == "h3" {
 		if command == "session-probe" || command == "replay-probe" || *probeSizes != "" || *probeRate != 20 {
 			return errors.New("raw UDP diagnostic options are not supported by HTTP/3")

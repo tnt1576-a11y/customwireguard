@@ -16,19 +16,26 @@ import (
 
 type Stats struct {
 	// Set before starting any readers; immutable for the run. Nil disables it.
-	Trace            *PacketTrace
-	Established      atomic.Uint64
-	Sent             atomic.Uint64
-	Received         atomic.Uint64
-	Rejected         atomic.Uint64
-	Oversize         atomic.Uint64
-	QueueDropped     atomic.Uint64
-	SocketErrors     atomic.Uint64
-	PacingQueued     atomic.Uint64
-	PacingDropped    atomic.Uint64
-	PacingQueueBytes atomic.Uint64
-	PacingPeakBytes  atomic.Uint64
-	PacingWaitUS     atomic.Uint64
+	Trace                *PacketTrace
+	Established          atomic.Uint64
+	Sent                 atomic.Uint64
+	Received             atomic.Uint64
+	Rejected             atomic.Uint64
+	Oversize             atomic.Uint64
+	QueueDropped         atomic.Uint64
+	SocketErrors         atomic.Uint64
+	PacingQueued         atomic.Uint64
+	PacingDropped        atomic.Uint64
+	PacingQueueBytes     atomic.Uint64
+	PacingPeakBytes      atomic.Uint64
+	PacingWaitUS         atomic.Uint64
+	ExchangeRequests     atomic.Uint64
+	ExchangeReplies      atomic.Uint64
+	ExchangeEmpty        atomic.Uint64
+	ExchangeExpired      atomic.Uint64
+	ExchangeQueueDropped atomic.Uint64
+	ExchangePending      atomic.Uint64
+	ExchangeWindowFull   atomic.Uint64
 }
 
 func (s *Stats) Snapshot() map[string]uint64 {
@@ -37,7 +44,10 @@ func (s *Stats) Snapshot() map[string]uint64 {
 		"queue_dropped": s.QueueDropped.Load(), "socket_errors": s.SocketErrors.Load(),
 		"pacing_queued": s.PacingQueued.Load(), "pacing_dropped": s.PacingDropped.Load(),
 		"pacing_queue_bytes": s.PacingQueueBytes.Load(), "pacing_peak_bytes": s.PacingPeakBytes.Load(),
-		"pacing_wait_us": s.PacingWaitUS.Load()}
+		"pacing_wait_us": s.PacingWaitUS.Load(), "exchange_requests": s.ExchangeRequests.Load(),
+		"exchange_replies": s.ExchangeReplies.Load(), "exchange_empty": s.ExchangeEmpty.Load(),
+		"exchange_expired": s.ExchangeExpired.Load(), "exchange_queue_dropped": s.ExchangeQueueDropped.Load(),
+		"exchange_pending": s.ExchangePending.Load(), "exchange_window_full": s.ExchangeWindowFull.Load()}
 }
 
 type packet struct {
@@ -103,6 +113,7 @@ func readers(ctx context.Context, stats *Stats, conns ...*net.UDPConn) ([]chan p
 }
 
 type association struct {
+	exchange    bool
 	id          wire.ID
 	codec       *wire.Codec
 	token       []byte
@@ -115,12 +126,23 @@ type association struct {
 }
 
 func newAssociation(key []byte, id wire.ID, token []byte, client bool, now time.Time) (*association, error) {
+	return newAssociationMode(key, id, token, client, now, false)
+}
+
+func codecForMode(key, material []byte, client, exchange bool) (*wire.Codec, error) {
+	if exchange {
+		return wire.NewExchangeCodec(key, material, client)
+	}
+	return wire.NewCodec(key, material, client)
+}
+
+func newAssociationMode(key []byte, id wire.ID, token []byte, client bool, now time.Time, exchange bool) (*association, error) {
 	material := append(append([]byte(nil), id[:]...), token...)
-	codec, err := wire.NewCodec(key, material, client)
+	codec, err := codecForMode(key, material, client, exchange)
 	if err != nil {
 		return nil, err
 	}
-	return &association{id: id, codec: codec, token: append([]byte(nil), token...), created: now, lastSeen: now}, nil
+	return &association{id: id, codec: codec, token: append([]byte(nil), token...), created: now, lastSeen: now, exchange: exchange}, nil
 }
 
 func (a *association) seal(kind byte, payload []byte, profile string, now time.Time) ([]byte, error) {
@@ -131,6 +153,13 @@ func (a *association) seal(kind byte, payload []byte, profile string, now time.T
 	if err != nil {
 		return nil, err
 	}
+	return a.sealSized(kind, payload, size, now)
+}
+
+func (a *association) sealSized(kind byte, payload []byte, size int, now time.Time) ([]byte, error) {
+	if a.send == math.MaxUint64 {
+		return nil, errors.New("session sequence exhausted")
+	}
 	a.send++
 	return a.codec.Seal(wire.Frame{Kind: kind, ID: a.id, Sequence: a.send, Timestamp: now.Unix(), Payload: payload}, size)
 }
@@ -140,7 +169,12 @@ func (a *association) open(p []byte, now time.Time) (wire.Frame, bool, bool) {
 	if err != nil || f.ID != a.id {
 		return wire.Frame{}, false, false
 	}
-	if f.Kind != wire.Data && f.Kind != wire.Ping && f.Kind != wire.Pong {
+	if a.exchange {
+		if !((f.Kind == wire.Exchange && len(f.Payload) <= wire.ExchangeMaxPayload && len(p) >= wire.ExchangeMinSize) ||
+			(f.Kind == wire.ExchangeReply && len(f.Payload) >= 9 && len(f.Payload) <= wire.ExchangeMaxPayload+9 && f.Payload[8] <= 1 && len(p) >= wire.ExchangeMinSize)) {
+			return wire.Frame{}, false, false
+		}
+	} else if f.Kind != wire.Data && f.Kind != wire.Ping && f.Kind != wire.Pong {
 		return wire.Frame{}, false, false
 	}
 	if (f.Kind == wire.Ping || f.Kind == wire.Pong) && len(f.Payload) != 8 {
