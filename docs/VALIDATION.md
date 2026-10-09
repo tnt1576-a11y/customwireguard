@@ -356,6 +356,23 @@ full Go suite passed. Go's vulnerability scan found no affected symbols or
 imported packages; six advisories were confined to unused parts of required
 modules. This is an automated dependency check, not a security audit.
 
+The first real user-run H3 attempt timed out during preflight with "no recent
+network activity". No tunnel service or route was created. The subsequent
+Diagnose-Client refusal is expected because startup did not complete. A live
+read-only check found UDP 443 listening, the service active with zero restarts,
+the expected firewall rules and no socket-buffer drops on that listener.
+Application counters do not record QUIC handshake arrivals, so these checks
+cannot identify which packets were lost or whether the cause is DPI.
+
+Measure-QUICPath.ps1 prepares a user-run H3/raw/H3 preflight comparison on the
+same server, with endpoint-scoped Packet Monitor capture and timestamped logs.
+It starts no tunnel and changes no routes, DNS or adapter bindings. Each child
+is limited to 30 seconds. Existing captures/filters are preserved; owned capture
+and child processes are cleaned up on handled errors. Ten offline fixtures
+passed PS7 and Windows PS5.1, including timeouts, failed probes, launch/wait
+errors, existing captures/filters, changed filters, active-client/virtual-route
+guards and capture-stop failure. The real comparison remains user-run/pending.
+
 ## Not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,

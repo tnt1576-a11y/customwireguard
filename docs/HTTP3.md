@@ -110,6 +110,23 @@ Neither this helper nor this release supplies a firewall kill switch.
 
 ## What this comparison can establish
 
+If preflight itself times out, the tunnel has not started. Do not interpret a
+later Diagnose-Client refusal as an additional VPN failure. With coordinated
+server-side capture prepared, the user can run this bounded comparison instead:
+
+```powershell
+.\scripts\Measure-QUICPath.ps1 -Bundle .\config-h3 -RawBundle .\config-8443
+```
+
+It performs H3/raw/H3 probes without a tunnel or routing changes. It requires
+Administrator PowerShell and a physical route to the same server in both
+bundles. Packet Monitor captures only UDP to/from that server; files stay in
+the private H3 bundle. Existing capture/filter state is not overwritten. This
+comparison changes both protocol and port, so a pass/fail difference alone
+cannot distinguish protocol classification from a port-specific policy.
+Capturing packets can itself affect timing. Correlate both endpoint captures
+before concluding where loss occurs; neither one proves an ISP's intent.
+
 The preceding raw-carrier video test lost 26/30 idle pings, 29/30 during video,
 and 23/30 afterward, even with tracing active. Matched packet hashes showed
 about 59% loss each way, beginning before the video. That invalidates treating
