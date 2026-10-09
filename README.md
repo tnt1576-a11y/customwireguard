@@ -163,9 +163,19 @@ did not. This is a correlation, not a confirmed workaround. The user-run
 (tracing off/on/off/on) using the same original configuration and bundle path.
 It changes no bindings, stops each tunnel, and archives previous/per-run logs
 in the private bundle. Packet tracing performs synchronous file writes and can
-alter scheduling; no transport timing change is justified until this comparison
-has been run. Each startup also creates a fresh UDP flow, so network variability
-remains a possible confounder.
+alter scheduling; the comparison does not identify the specific timing or
+network mechanism. The completed comparison reproduced severe loss with tracing off
+and success with tracing on in both repetitions. Each startup also creates a
+fresh UDP flow, so network variability remains a possible confounder.
+
+To investigate the user's report that the failed normal run had YouTube active,
+`scripts/Measure-VideoLoad.ps1 -Bundle PATH` measures one continuously connected
+Full session with tracing on: idle, user-started YouTube playback, then idle after
+the user closes the tab. It records timed private pings and tunnel byte counters,
+prompts for the two manual actions, and stops the tunnel on completion/error.
+It aborts if the 100,000-record trace limit is reached: logging then stops doing
+synchronous writes, which would confound the load test. Tracing is a bounded
+diagnostic, not a production pacing mechanism or a verified reliability fix.
 
 ## Transport settings and limits
 

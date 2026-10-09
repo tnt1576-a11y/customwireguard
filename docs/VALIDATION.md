@@ -305,8 +305,29 @@ per-phase evidence, and stops each tunnel. Six offline cases passed PowerShell 7
 and Windows PowerShell 5.1, covering flag order, same-path startup, failed/partial
 startup cleanup, diagnosis/launch failure, pending filter recovery and evidence
 preservation after a cleanup error. No actual client run has been performed by
-the assistant. The real tracing comparison is pending. A fresh UDP flow per
-startup and background/network variability can still affect results.
+the assistant. The real comparison is now complete. With tracing off, the two
+runs passed 3/23 and 6/23 total pings, and 0/3 and 1/3 HTTPS requests. With tracing
+on, both runs passed 23/23 pings and 3/3 HTTPS requests, reporting the server's
+public IP. The traced associations lasted 28.485 and 29.311 seconds. Hash matching
+found all 322/322 and 259/259 outbound packets and all 274/274 and 208/208 return
+packets. The failed untraced runs had no CWG queue/socket/rejection errors, but
+no client hash trace exists for an exact loss calculation. Same native profile,
+bundle path and interface binding were used. This repeats the tracing-related
+effect; it does not prove a specific driver, congestion or DPI mechanism. A fresh
+UDP flow per startup and background/network variability can still affect results.
+
+The user clarified that WireSock's app was closed in both earlier runs and there
+were no intentional network changes, then recalled that YouTube was active during
+the failed normal run and nothing was open during the passing comparison. That
+adds a traffic-load confounder. A one-session idle/video/idle test is prepared in
+Measure-VideoLoad.ps1. It keeps tracing enabled, records one-second private ping
+samples and per-phase tunnel byte deltas, and asks the user when to start and
+close the video. No connection restart occurs between phases. It detects the
+trace record limit and stops rather than interpreting the logging cutoff as a
+video-only effect. Five offline cases passed PS7 and Windows PS5.1, including
+phase loss/recovery, trace-limit abort, interrupted prompting and partial-start
+cleanup. The real load test remains user-run and pending; no transport redesign,
+pacing change, server change or actual client test was made by the assistant.
 
 ## Not verified here
 
