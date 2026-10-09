@@ -373,6 +373,33 @@ passed PS7 and Windows PS5.1, including timeouts, failed probes, launch/wait
 errors, existing captures/filters, changed filters, active-client/virtual-route
 guards and capture-stop failure. The real comparison remains user-run/pending.
 
+The user completed that comparison: both H3 attempts timed out after about
+eight seconds; raw UDP on the alternate port received all four replies at
+256, 512, 1024 and 1440 bytes, median about 89 ms. The server capture contained
+exactly those eight raw request/reply packets and no UDP 443 packets, with zero
+kernel capture drops. The Windows capture contained no packets at all, including
+the known-working raw flow, so it is unusable for deciding whether QUIC left the
+PC. The endpoint was reachable on the alternate port during this test. Protocol,
+port-specific and local delivery causes remain unresolved; this is not proof
+of DPI or complete endpoint blocking.
+
+The diagnostic also exposed two helper defects: a long Packet Monitor filter
+name was truncated, preventing the ownership check from cleaning it up, and
+PS5.1 did not retain process exit codes. The one known stopped filter was
+removed after checking its displayed name, endpoint and sole-filter state.
+New filter names fit the display column; process handles are cached before
+waiting; empty captures are explicitly marked unusable. Ten offline capture
+fixtures passed both shells, including truncated-name behavior.
+
+Version 0.2.1 adds opt-in Windows H3 preflight socket metadata and physical
+interface binding. The wrapper preserves UDP socket interfaces and records
+only times, endpoints, sizes and hashes, never payloads or secrets. It logs
+successful socket operations; writes do not prove delivery. Local tests verify
+normal and interface-bound handshakes, capability preservation, and retained
+writes when the peer is silent. Measure-H3Socket.ps1 prepares default/bound/
+default H3 preflights plus a raw control, without Packet Monitor or a tunnel.
+Seven offline helper fixtures passed PS7 and PS5.1. The real test is pending.
+
 ## Not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,

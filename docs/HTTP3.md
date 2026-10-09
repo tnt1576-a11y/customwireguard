@@ -1,4 +1,4 @@
-# HTTP/3 comparison (v0.2.0)
+# HTTP/3 comparison (v0.2.0; Windows diagnostics added in v0.2.1)
 
 This alternative carries the complete WireGuard datagram in standard HTTP/3
 CONNECT-UDP (RFC 9298), HTTP Datagrams (RFC 9297), and QUIC DATAGRAM frames
@@ -109,6 +109,27 @@ a client restart so the Windows interface pin and bypass route can be rebuilt.
 Neither this helper nor this release supplies a firewall kill switch.
 
 ## What this comparison can establish
+
+For Windows socket-level diagnosis with v0.2.1, use:
+
+```powershell
+.\scripts\Measure-H3Socket.ps1 -Bundle .\config-h3 -RawBundle .\config-8443
+```
+
+This records three H3 preflights (normal routing, explicit physical-interface
+selection, normal routing) and one raw control. It creates no tunnel, changes
+no routes or adapter bindings, and does not use Packet Monitor. The selected
+interface is applied only to that probe's UDP socket. Each child is limited to
+30 seconds. H3 metadata records accepted socket writes and reads as packet
+hashes, lengths and timestamps, including failed handshakes. Successful writes
+are not evidence that packets reached the NIC or server. The traces are private
+and logging may affect timing. Correlate them with a server capture.
+
+This is equivalent to opt-in `cwg probe -config H3_CLIENT.json -count 2 -trace
+NEW_FILE.jsonl -interface-index WINDOWS_IFINDEX`. Index zero uses normal routing.
+Probe tracing is Windows-only, preserving the socket capabilities used by
+quic-go there; it does not disable Linux's batched socket I/O. Existing client/
+server `-trace` behavior remains local-WireGuard metadata for H3.
 
 If preflight itself times out, the tunnel has not started. Do not interpret a
 later Diagnose-Client refusal as an additional VPN failure. With coordinated

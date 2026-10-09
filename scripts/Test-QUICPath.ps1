@@ -17,7 +17,7 @@ function Invoke-FakePktmon {
     switch ($items[0]) {
         'status' {if ($global:QCase -eq 'existing-capture') {'Packet Monitor is running.'} else {'Packet Monitor is not running.'}}
         'filter' {switch ($items[1]) {
-            'list' {if ($global:QFilter) {"Filters`n1 $global:QFilter UDP"} else {"Filters`n None"}}
+            'list' {if ($global:QFilter) {$display=$global:QFilter; if ($display.Length -gt 26) {$display=$display.Substring(0,23)+'...'}; "Filters`n1 $display UDP"} else {"Filters`n None"}}
             'add' {$global:QFilter=$items[2];'added'}
             'remove' {$global:QFilter='';'removed'}
             default {throw 'Unknown filter command'}

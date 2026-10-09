@@ -18,7 +18,7 @@ import (
 	"customwireguard/internal/transport"
 )
 
-var version = "0.2.0-dev"
+var version = "0.2.1-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -48,11 +48,11 @@ func run(args []string) error {
 	profile := f.String("profile", "balanced", "balanced or minimal (init only)")
 	count := f.Int("count", 5, "authenticated UDP probes (probe only, 1..100)")
 	probeSizes := f.String("sizes", "", "comma-separated UDP payload sizes (probe only, 256..1440, at most 32)")
-	tracePath := f.String("trace", "", "new private metadata trace file (client/server only; no packet bytes)")
+	tracePath := f.String("trace", "", "new private metadata trace (client/server, or Windows H3 probe; no packet bytes)")
 	patternPath := f.String("pattern", "", "client metadata trace to reproduce (replay-probe only)")
 	replayStyle := f.String("style", "recorded", "recorded or paced (replay-probe only)")
 	probeRate := f.Int("probe-rate-limit", 20, "authenticated diagnostic reply limit, 20..200/s (server only)")
-	interfaceIndex := f.Int("interface-index", 0, "Windows outer IPv4 interface index; 0 uses routing table (client only)")
+	interfaceIndex := f.Int("interface-index", 0, "Windows outer IPv4 interface index; 0 uses routing table (client or H3 probe)")
 	if err := f.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -62,14 +62,14 @@ func run(args []string) error {
 	if f.NArg() != 0 {
 		return errors.New("unexpected positional argument")
 	}
-	if *interfaceIndex < 0 || *interfaceIndex > 0xffffff || (*interfaceIndex != 0 && command != "client") {
-		return errors.New("-interface-index must be 0..16777215 and is client-only")
+	if *interfaceIndex < 0 || *interfaceIndex > 0xffffff || (*interfaceIndex != 0 && command != "client" && command != "probe") {
+		return errors.New("-interface-index must be 0..16777215 and is for client or H3 probe")
 	}
 	if *probeSizes != "" && command != "probe" {
 		return errors.New("-sizes is only valid with probe")
 	}
-	if *tracePath != "" && command != "client" && command != "server" {
-		return errors.New("-trace is only valid with client or server")
+	if *tracePath != "" && command != "client" && command != "server" && command != "probe" {
+		return errors.New("-trace is only valid with client, server or Windows H3 probe")
 	}
 	if *probeRate < 20 || *probeRate > 200 || (*probeRate != 20 && command != "server") {
 		return errors.New("-probe-rate-limit must be 20..200 and is server-only")
@@ -126,7 +126,19 @@ func run(args []string) error {
 			return errors.New("raw UDP diagnostic options are not supported by HTTP/3")
 		}
 		if command == "probe" {
-			result, err := transport.ProbeH3(ctx, cfg, *count)
+			var trace *transport.PacketTrace
+			if *tracePath != "" {
+				trace, err = transport.OpenPacketTrace(*tracePath)
+				if err != nil {
+					return err
+				}
+				defer func() {
+					if err := trace.Close(); err != nil {
+						fmt.Fprintln(os.Stderr, "packet trace error:", err)
+					}
+				}()
+			}
+			result, err := transport.ProbeH3(ctx, cfg, *count, transport.H3ProbeOptions{InterfaceIndex: *interfaceIndex, Trace: trace})
 			if err != nil {
 				return err
 			}
@@ -151,6 +163,9 @@ func run(args []string) error {
 		return err
 	}
 	if command == "probe" {
+		if *tracePath != "" || *interfaceIndex != 0 {
+			return errors.New("raw probe does not support -trace or -interface-index")
+		}
 		sizes, e := parseProbeSizes(*probeSizes)
 		if e != nil {
 			return e
@@ -255,6 +270,7 @@ func usage() {
   cwg client -config client.json -trace NEW_PRIVATE_FILE.jsonl
   cwg client -config client.json -interface-index WINDOWS_PHYSICAL_IFINDEX
   cwg probe -config client.json -count 5
+  cwg probe -config H3_CLIENT.json -count 2 -trace NEW_FILE.jsonl -interface-index WINDOWS_PHYSICAL_IFINDEX
   cwg probe -config client.json -count 16 -sizes 256,257,258,259
   cwg session-probe -config client.json
   cwg replay-probe -config client.json -pattern packets-full.jsonl -style recorded

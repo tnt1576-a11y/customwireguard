@@ -110,7 +110,7 @@ func (s *h3Session) close() {
 	}
 }
 
-func dialH3(ctx context.Context, c config.Config, index int, connect bool) (_ *h3Session, err error) {
+func dialH3(ctx context.Context, c config.Config, index int, connect bool, traces ...*PacketTrace) (_ *h3Session, err error) {
 	tlsConfig, err := h3ClientTLS(c)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,14 @@ func dialH3(ctx context.Context, c config.Config, index int, connect bool) (_ *h
 	}
 	s.udp.SetReadBuffer(2 << 20)
 	s.udp.SetWriteBuffer(2 << 20)
-	s.tr = &quic.Transport{Conn: s.udp}
+	var packetConn net.PacketConn = s.udp
+	if len(traces) != 0 && traces[0] != nil {
+		packetConn, err = traceH3Socket(s.udp, traces[0])
+		if err != nil {
+			return nil, err
+		}
+	}
+	s.tr = &quic.Transport{Conn: packetConn}
 	addr, _ := net.ResolveUDPAddr("udp", c.Endpoint)
 	s.q, err = s.tr.Dial(sessionCtx, addr, tlsConfig, h3QUICConfig())
 	if err != nil {
@@ -160,15 +167,29 @@ func dialH3(ctx context.Context, c config.Config, index int, connect bool) (_ *h
 	return s, nil
 }
 
+// H3ProbeOptions enables opt-in Windows socket diagnostics, without changing
+// routing or adapter configuration.
+type H3ProbeOptions struct {
+	InterfaceIndex int
+	Trace          *PacketTrace
+}
+
 // ProbeH3 verifies TLS pinning, HTTP/3 and authorization only. It deliberately
 // creates no WireGuard association and makes no routing or interface changes.
-func ProbeH3(ctx context.Context, c config.Config, count int) (map[string]any, error) {
+func ProbeH3(ctx context.Context, c config.Config, count int, options ...H3ProbeOptions) (map[string]any, error) {
 	if count < 1 || count > 100 {
 		return nil, errors.New("count must be 1..100")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	s, err := dialH3(ctx, c, 0, false)
+	var opt H3ProbeOptions
+	if len(options) > 1 {
+		return nil, errors.New("at most one H3 probe options value is supported")
+	}
+	if len(options) == 1 {
+		opt = options[0]
+	}
+	s, err := dialH3(ctx, c, opt.InterfaceIndex, false, opt.Trace)
 	if err != nil {
 		return nil, err
 	}

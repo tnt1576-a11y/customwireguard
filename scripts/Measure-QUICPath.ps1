@@ -28,7 +28,7 @@ $filters=(& $pktmon filter list 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0 -or $filters -notmatch '(?m)^\s*None\s*$') {throw 'Packet Monitor has existing filters; they will not be changed.'}
 $stamp=[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff')
 $prefix=Join-Path $bundlePath ('quic-path-'+$stamp)
-$report=$prefix+'.report.txt'; $etl=$prefix+'.etl'; $filterName='CWG-QUIC-'+$stamp
+$report=$prefix+'.report.txt'; $etl=$prefix+'.etl'; $filterName='Q-'+$stamp # short enough for pktmon's name column
 $filterAdded=$false; $captureStarted=$false; $captureStopped=$false
 function Write-Report([string]$Text) {Add-Content -LiteralPath $report -Value $Text -Encoding UTF8; Write-Host $Text}
 function Invoke-PacketMonitor([string[]]$Arguments) {
@@ -42,13 +42,14 @@ function Invoke-Preflight([string]$Name,[string]$Folder,[int]$Count) {
     $arguments=@('probe','-config',('"'+(Join-Path $Folder 'client.json')+'"'),'-count',[string]$Count)
     $process=Start-Process -FilePath $executable -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     try {
+        $null=$process.Handle
         if (-not $process.WaitForExit(30000)) {
             # Only this freshly created child process is owned by the helper.
             $process.Kill(); $process.WaitForExit()
             Write-Report 'Preflight exceeded 30 seconds; owned child stopped.'
         }
-        $process.Refresh()
-        Write-Report ('Exit code: '+$process.ExitCode)
+        $process.WaitForExit()
+        if ($null -eq $process.ExitCode) {Write-Report 'Exit code unavailable; inspect output (not a success indication).'} else {Write-Report ('Exit code: '+$process.ExitCode)}
         foreach ($path in @($stdout,$stderr)) {
             $text=Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
             if ($text) {Write-Report $text.TrimEnd()}
@@ -87,6 +88,7 @@ try {
     if ($captureStopped -and (Test-Path -LiteralPath $etl)) {
         Invoke-PacketMonitor -Arguments @('etl2pcap',$etl,'--out',($prefix+'.pcapng'))
         Invoke-PacketMonitor -Arguments @('etl2txt',$etl,'--out',($prefix+'.txt'),'--brief')
+        if ((Get-Item -LiteralPath ($prefix+'.pcapng')).Length -le 156) {Write-Report 'WARNING: packet capture is empty; it cannot establish that no packets left this PC.'}
     }
 }
 Write-Report ('Completed UTC '+[DateTime]::UtcNow.ToString('o'))

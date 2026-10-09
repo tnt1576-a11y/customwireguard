@@ -1,6 +1,8 @@
 package main
 
 import (
+	"customwireguard/internal/config"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,12 +32,24 @@ func TestParseProbeSizes(t *testing.T) {
 func TestInterfaceFlagValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"server", "-interface-index", "1"},
-		{"probe", "-interface-index", "1"},
 		{"client", "-interface-index", "-1"},
 		{"client", "-interface-index", "16777216"},
 	} {
 		if err := run(args); err == nil || !strings.Contains(err.Error(), "-interface-index") {
 			t.Fatalf("expected flag rejection for %v, got %v", args, err)
+		}
+	}
+}
+
+func TestRawProbeRejectsH3DiagnosticFlags(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if err := config.Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {
+		t.Fatal(err)
+	}
+	for _, flags := range [][]string{{"-interface-index", "1"}, {"-trace", filepath.Join(dir, "trace.jsonl")}} {
+		args := append([]string{"probe", "-config", filepath.Join(dir, "client.json")}, flags...)
+		if err := run(args); err == nil || !strings.Contains(err.Error(), "raw probe does not support") {
+			t.Fatalf("unexpected result: %v", err)
 		}
 	}
 }
