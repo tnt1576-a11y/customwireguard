@@ -1,0 +1,5 @@
+# One atomic transaction, limited to this application's reserved table.
+add table inet cwg_guard
+add chain inet cwg_guard input { type filter hook input priority -50; policy accept; }
+flush chain inet cwg_guard input
+add rule inet cwg_guard input iifname != "lo" udp dport 51820 drop
