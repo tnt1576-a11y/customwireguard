@@ -30,6 +30,8 @@ func RunClient(ctx context.Context, local, remote *net.UDPConn, cfg config.Confi
 	wgAddr := netip.MustParseAddrPort(cfg.WireGuard)
 	channels, cleanup := readers(ctx, stats, local, remote)
 	defer cleanup()
+	pacer := newPacketPacer(cfg, remote, stats)
+	defer pacer.reset()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var active *association
@@ -38,6 +40,7 @@ func RunClient(ctx context.Context, local, remote *net.UDPConn, cfg config.Confi
 	var nextHello, nextPing time.Time
 	var queued [][]byte
 	reset := func() {
+		pacer.reset()
 		active = nil
 		id = wire.NewID()
 		attemptStarted = time.Now()
@@ -50,14 +53,18 @@ func RunClient(ctx context.Context, local, remote *net.UDPConn, cfg config.Confi
 			stats.Oversize.Add(1)
 			return
 		}
-		if send(remote, zeroAddr, out, stats) && kind == wire.Data {
-			stats.Sent.Add(1)
+		if kind == wire.Data {
+			pacer.push(out, zeroAddr, now)
+		} else {
+			send(remote, zeroAddr, out, stats)
 		}
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-pacer.ready():
+			pacer.drain(time.Now())
 		case now := <-ticker.C:
 			if active != nil && now.Sub(active.lastSeen) > 70*time.Second {
 				reset()

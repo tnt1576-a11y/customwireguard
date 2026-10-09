@@ -61,6 +61,34 @@ func TestRejectUnknownAndTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestRawPacingValidation(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(filepath.Join(dir, "client.json"), "client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pair := range [][2]int{{0, 0}, {128, 0}, {1000, 150}, {100000, 1000}} {
+		c.PaceKbps, c.PaceQueueMS = pair[0], pair[1]
+		if err := c.Validate("client"); err != nil {
+			t.Fatal(pair, err)
+		}
+	}
+	for _, pair := range [][2]int{{-1, 0}, {1, 0}, {100001, 0}, {0, 150}, {1000, -1}, {1000, 9}, {1000, 1001}} {
+		c.PaceKbps, c.PaceQueueMS = pair[0], pair[1]
+		if c.Validate("client") == nil {
+			t.Fatal("accepted invalid pacing", pair)
+		}
+	}
+	c.PaceKbps, c.PaceQueueMS = 1000, 150
+	c.Transport, c.TLSCert, c.H3Target = "h3", "server-cert.pem", "127.0.0.1:51820"
+	if c.Validate("client") == nil {
+		t.Fatal("accepted raw pacing on H3")
+	}
+}
+
 func TestH3ConfigurationAndRelativePin(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bundle")
 	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {

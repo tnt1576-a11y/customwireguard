@@ -1,10 +1,10 @@
 # CWG: experimental UDP transport for WireGuard
 
-CWG now offers an experimental **HTTP/3 CONNECT-UDP transport** alongside the
-original raw UDP carrier. Both carry complete native WireGuard datagrams.
-The HTTP/3 variant uses QUIC/TLS 1.3, an exact certificate pin, authenticated
-CONNECT requests and a fixed server-side destination. See [HTTP/3 setup and
-limitations](docs/HTTP3.md). It is UDP-only; there is no TCP fallback.
+The current research path is an **encrypted UDP carrier with optional outbound
+pacing**. It carries complete native WireGuard datagrams and remains UDP-only;
+there is no TCP fallback. The earlier [HTTP/3 experiment](docs/HTTP3.md) remains
+available for reference, but failed preflight on the target network on both
+tested ports. Work on that path has stopped at the user's request.
 
 The original raw carrier wraps the **complete WireGuard UDP datagram** in authenticated encryption and
 variable padding. Standard WireGuard remains responsible for the VPN's keys,
@@ -13,8 +13,7 @@ counters and exact small-packet lengths from the outer connection.
 
 This is a research prototype for testing a network where UDP is selectively
 filtered. **Successful local tests do not establish DPI evasion on that network.**
-The original carrier looks like unfamiliar encrypted UDP; the new carrier is
-real HTTP/3, but does not reproduce a browser's traffic fingerprint. IP
+The raw carrier looks like unfamiliar encrypted UDP. IP
 addresses, lengths, timing and volume remain observable. No design here promises
 that a server address will avoid blocking. CWG has not had an independent security
 audit and is not a drop-in replacement for a mature VPN product.
@@ -27,8 +26,9 @@ audit and is not a drop-in replacement for a mature VPN product.
 - Fresh challenge per association; distinct directional keys; bounded replay
   window; authenticated endpoint migration; unauthenticated packets receive no
   application reply and never reach WireGuard.
-- `balanced` padding (default) and `minimal` padding profiles. No deliberate delay
-  or retransmission of data packets is added by CWG.
+- `balanced` padding (default) and `minimal` padding profiles. Optional data
+  pacing limits bursts in each sending direction, with a bounded delay queue
+  and explicit drop counters. CWG does not retransmit data packets.
 - A non-disruptive authenticated probe at 256, 512, 1024 and 1440 UDP payload bytes.
 - Windows key-bundle/start/stop helpers and a Linux systemd installer that keeps
   the original WireGuard port inaccessible from external interfaces.
@@ -44,6 +44,28 @@ need separate instances, ports, WireGuard configurations and secrets. Starting a
 second raw client with the same secret replaces the first association. HTTP/3
 rejects simultaneous flows instead. The `probe`
 command does not replace it.
+
+## Optional raw UDP pacing (0.3.0)
+
+Set `"pace_kbps": 1000` in each private raw client/server JSON configuration
+to cap each sender at approximately 1 Mbit/s. The receiver's setting does not
+limit its peer; configure both sides. `"pace_queue_ms": 150` bounds queued
+delay; it defaults to 150 when pacing is enabled. Zero/omitted `pace_kbps`
+preserves the original immediate-send behavior. Valid limits are 128..100000
+kbit/s and 10..1000 ms. Existing older binaries reject these new fields.
+
+Pacing spaces encrypted data datagrams, counting padding and conservative IP/UDP
+header overhead. It retains at most 256 queued packets and discards packets
+whose wait budget is exceeded. Authentication/control traffic remains bounded
+separately and is not delayed behind bulk data. Session replacement clears the
+queue; authenticated endpoint migration updates queued destinations. Logs expose
+`pacing_queued`, `pacing_dropped`, current/peak queue bytes and cumulative wait
+microseconds, separately from receive-queue drops and socket errors.
+
+This is a fixed rate ceiling, not adaptive congestion control or loss recovery.
+Start conservatively and raise the rate only after a sustained user-run test.
+Pacing cannot make an unfamiliar protocol indistinguishable from allowed traffic,
+and deliberately low initial limits will reduce throughput.
 
 ## First deployment (original raw transport)
 

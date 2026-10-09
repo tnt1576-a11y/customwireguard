@@ -18,7 +18,7 @@ import (
 	"customwireguard/internal/transport"
 )
 
-var version = "0.2.1-dev"
+var version = "0.3.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

@@ -15,16 +15,18 @@ import (
 // One configuration and key pair serves one WireGuard peer. Use separate
 // processes/ports for additional peers to keep association and revocation simple.
 type Config struct {
-	Mode      string `json:"mode"`
-	Listen    string `json:"listen"`
-	Endpoint  string `json:"endpoint,omitempty"`
-	WireGuard string `json:"wireguard"`
-	Key       string `json:"key"`
-	Profile   string `json:"profile"`
-	Transport string `json:"transport,omitempty"`
-	TLSCert   string `json:"tls_cert,omitempty"`
-	TLSKey    string `json:"tls_key,omitempty"`
-	H3Target  string `json:"h3_target,omitempty"`
+	Mode        string `json:"mode"`
+	Listen      string `json:"listen"`
+	Endpoint    string `json:"endpoint,omitempty"`
+	WireGuard   string `json:"wireguard"`
+	Key         string `json:"key"`
+	Profile     string `json:"profile"`
+	Transport   string `json:"transport,omitempty"`
+	TLSCert     string `json:"tls_cert,omitempty"`
+	TLSKey      string `json:"tls_key,omitempty"`
+	H3Target    string `json:"h3_target,omitempty"`
+	PaceKbps    int    `json:"pace_kbps,omitempty"`
+	PaceQueueMS int    `json:"pace_queue_ms,omitempty"`
 }
 
 func Load(path string, mode string) (Config, error) {
@@ -84,6 +86,15 @@ func (c Config) Validate(mode string) error {
 	}
 	if c.Transport != "" && c.Transport != "raw" && c.Transport != "h3" {
 		return errors.New("transport must be raw or h3")
+	}
+	if c.PaceKbps != 0 && (c.PaceKbps < 128 || c.PaceKbps > 100000) {
+		return errors.New("pace_kbps must be zero or 128..100000")
+	}
+	if c.PaceQueueMS != 0 && (c.PaceQueueMS < 10 || c.PaceQueueMS > 1000) {
+		return errors.New("pace_queue_ms must be zero or 10..1000")
+	}
+	if (c.PaceKbps == 0 && c.PaceQueueMS != 0) || (c.Transport == "h3" && c.PaceKbps != 0) {
+		return errors.New("pacing requires a nonzero raw UDP pace_kbps")
 	}
 	if c.Transport == "h3" {
 		if c.TLSCert == "" || (mode == "server" && c.TLSKey == "") {

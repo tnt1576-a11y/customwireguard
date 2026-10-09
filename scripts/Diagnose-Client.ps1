@@ -21,9 +21,12 @@ function Invoke-DiagnosticCommand([string]$Name,[string]$Executable,[string]$Arg
     Write-Report ("`n--- " + $Name + ' ---')
     $stdout = Join-Path $bundlePath ('diagnostic-' + $stamp + '-' + $Name + '.stdout.log')
     $stderr = Join-Path $bundlePath ('diagnostic-' + $stamp + '-' + $Name + '.stderr.log')
-    $command = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $command = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     try {
-        Write-Report ('Exit code: ' + $command.ExitCode)
+        $null = $command.Handle
+        $command.WaitForExit()
+        if ($null -eq $command.ExitCode) { Write-Report 'Exit code unavailable; inspect output (not a success indication).' }
+        else { Write-Report ('Exit code: ' + $command.ExitCode) }
         foreach ($path in @($stdout,$stderr)) {
             $text = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
             if ($text) { Write-Report $text.TrimEnd() }

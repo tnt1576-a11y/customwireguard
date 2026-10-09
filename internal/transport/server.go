@@ -45,6 +45,8 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 	}
 	channels, cleanup := readers(ctx, stats, conn, backend)
 	defer cleanup()
+	pacer := newPacketPacer(cfg, conn, stats)
+	defer pacer.reset()
 	var active, pending *association
 	bootstrapLimit := bucket{rate: 100, burst: 200}
 	welcomeLimit := bucket{rate: 2, burst: 4}
@@ -59,6 +61,12 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-pacer.ready():
+			if active == nil || time.Since(active.lastSeen) >= 3*time.Minute {
+				pacer.reset()
+			} else {
+				pacer.drain(time.Now())
+			}
 		case p := <-channels[0]:
 			now := time.Now()
 			var a *association
@@ -73,6 +81,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 			if !ok && pending != nil && now.Sub(pending.created) < 15*time.Second {
 				f, ok, newest = pending.open(p.data, now)
 				if ok && (f.Kind == wire.Data || f.Kind == wire.Ping) {
+					pacer.reset()
 					active, pending = pending, nil
 					a = active
 					stats.Established.Add(1)
@@ -83,6 +92,9 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 			if ok && a != nil {
 				// An older, reordered packet must not move the response endpoint back.
 				if newest {
+					if a.addr != p.addr {
+						pacer.rebind(p.addr)
+					}
 					a.addr = p.addr
 				}
 				switch f.Kind {
@@ -179,9 +191,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 				stats.Oversize.Add(1)
 				continue
 			}
-			if send(conn, active.addr, out, stats) {
-				stats.Sent.Add(1)
-			}
+			pacer.push(out, active.addr, now)
 		}
 	}
 }

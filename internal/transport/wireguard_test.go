@@ -25,9 +25,10 @@ import (
 func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	t.Run("raw", func(t *testing.T) { testRealWireGuard(t, false) })
 	t.Run("h3", func(t *testing.T) { testRealWireGuard(t, true) })
+	t.Run("paced-raw", func(t *testing.T) { testRealWireGuard(t, false, 1000) })
 }
 
-func testRealWireGuard(t *testing.T, h3 bool) {
+func testRealWireGuard(t *testing.T, h3 bool, pace ...int) {
 	clientTun, serverTun := tuntest.NewChannelTUN(), tuntest.NewChannelTUN()
 	clientWG := device.NewDevice(clientTun.TUN(), conn.NewStdNetBind(), device.NewLogger(device.LogLevelSilent, ""))
 	serverWG := device.NewDevice(serverTun.TUN(), conn.NewStdNetBind(), device.NewLogger(device.LogLevelSilent, ""))
@@ -70,6 +71,9 @@ func testRealWireGuard(t *testing.T, h3 bool) {
 	secret := keyString()
 	clientCfg := config.Config{Mode: "client", Listen: local.LocalAddr().String(), Endpoint: public.LocalAddr().String(), WireGuard: clientPort, Key: secret, Profile: "balanced"}
 	serverCfg := config.Config{Mode: "server", Listen: public.LocalAddr().String(), WireGuard: serverPort, Key: secret, Profile: "balanced"}
+	if len(pace) != 0 {
+		clientCfg.PaceKbps, serverCfg.PaceKbps = pace[0], pace[0]
+	}
 	if h3 {
 		clientCfg, serverCfg = h3Configs(t, local.LocalAddr().String(), public.LocalAddr().String(), clientPort, serverPort)
 	}

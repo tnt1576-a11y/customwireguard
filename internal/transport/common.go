@@ -16,20 +16,28 @@ import (
 
 type Stats struct {
 	// Set before starting any readers; immutable for the run. Nil disables it.
-	Trace        *PacketTrace
-	Established  atomic.Uint64
-	Sent         atomic.Uint64
-	Received     atomic.Uint64
-	Rejected     atomic.Uint64
-	Oversize     atomic.Uint64
-	QueueDropped atomic.Uint64
-	SocketErrors atomic.Uint64
+	Trace            *PacketTrace
+	Established      atomic.Uint64
+	Sent             atomic.Uint64
+	Received         atomic.Uint64
+	Rejected         atomic.Uint64
+	Oversize         atomic.Uint64
+	QueueDropped     atomic.Uint64
+	SocketErrors     atomic.Uint64
+	PacingQueued     atomic.Uint64
+	PacingDropped    atomic.Uint64
+	PacingQueueBytes atomic.Uint64
+	PacingPeakBytes  atomic.Uint64
+	PacingWaitUS     atomic.Uint64
 }
 
 func (s *Stats) Snapshot() map[string]uint64 {
 	return map[string]uint64{"sessions": s.Established.Load(), "data_sent": s.Sent.Load(),
 		"data_received": s.Received.Load(), "rejected": s.Rejected.Load(), "oversize": s.Oversize.Load(),
-		"queue_dropped": s.QueueDropped.Load(), "socket_errors": s.SocketErrors.Load()}
+		"queue_dropped": s.QueueDropped.Load(), "socket_errors": s.SocketErrors.Load(),
+		"pacing_queued": s.PacingQueued.Load(), "pacing_dropped": s.PacingDropped.Load(),
+		"pacing_queue_bytes": s.PacingQueueBytes.Load(), "pacing_peak_bytes": s.PacingPeakBytes.Load(),
+		"pacing_wait_us": s.PacingWaitUS.Load()}
 }
 
 type packet struct {

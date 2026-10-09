@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 
 def udp():
@@ -32,6 +33,7 @@ def run(exe, *args):
 def main():
     exe = Path(sys.argv[1]).resolve(strict=True)
     interface_args = ['-interface-index', str(int(sys.argv[2]))] if len(sys.argv) > 2 else []
+    pace = int(sys.argv[3]) if len(sys.argv) > 3 else 0
     processes = []
     sockets = []
     failed = True
@@ -48,6 +50,8 @@ def main():
             client['listen'], client['wireguard'] = client_address, address(wg)
             server['listen'], server['wireguard'] = server_address, address(backend)
             for name, cfg in [('client', client), ('server', server)]:
+                if pace:
+                    cfg['pace_kbps'], cfg['pace_queue_ms'] = pace, 150
                 (bundle / f'{name}.json').write_text(json.dumps(cfg))
                 run(exe, 'check', '-config', str(bundle / f'{name}.json'))
             outer_reservation.close()
@@ -77,6 +81,28 @@ def main():
             original = b'live connection after diagnostic'
             wg.sendto(original, (target_host, int(target_port)))
             assert backend.recvfrom(65535)[0] == original, 'Probe disrupted live association'
+            burst_elapsed = {}
+            if pace:
+                # Burst traffic must be delivered intact and actually spaced in
+                # both directions. These are temporary localhost UDP sockets.
+                messages = [i.to_bytes(2, 'big') + secrets.token_bytes(1198) for i in range(10)]
+                for direction, source, target, receiver in [
+                    ('upload', wg, (target_host, int(target_port)), backend),
+                    ('download', backend, peer, wg),
+                ]:
+                    for message in messages:
+                        source.sendto(message, target)
+                    first = None
+                    for message in messages:
+                        got, _ = receiver.recvfrom(65535)
+                        now = time.monotonic()
+                        if first is None:
+                            first = now
+                        assert got == message, f'{direction} burst changed, reordered or lost data'
+                    elapsed = time.monotonic() - first
+                    minimum = (len(messages)-1) * (1200+48) * 8 / (pace*1000)
+                    assert elapsed >= minimum * 0.75, f'{direction} pacing not applied: {elapsed}'
+                    burst_elapsed[direction] = round(elapsed, 4)
             attacker = udp()
             sockets.append(attacker)
             server_host, server_port = server_address.rsplit(':', 1)
@@ -101,6 +127,7 @@ def main():
             print(json.dumps({'exact_executable': str(exe), 'roundtrip_sizes': [32, 148, 1280, 1364],
                               'probe': result, 'unauthenticated_silence': True,
                               'live_session_preserved': True, 'socket_traces_correlated': True,
+                              'pace_kbps': pace, 'burst_seconds': burst_elapsed,
                               'os_routes_changed': False}, indent=2))
             failed = False
         finally:

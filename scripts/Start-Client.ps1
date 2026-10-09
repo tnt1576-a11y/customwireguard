@@ -28,6 +28,8 @@ if ($cfg.transport -eq 'h3') {
         throw 'HTTP/3 comparison requires MTU = 1088 and IPv4-only Address/AllowedIPs in the native WireGuard profile.'
     }
     Write-Host 'Transport: HTTP/3 CONNECT-UDP with pinned TLS. The preflight verifies HTTP/3 access only.'
+} elseif ($cfg.pace_kbps -gt 0) {
+    Write-Host ('Transport: encrypted UDP; client sending limit '+$cfg.pace_kbps+' kbit/s. The server controls its own sending limit.')
 }
 foreach ($name in @('cwg-test','cwg-full')) {
     if (Get-Service -Name ('WireGuardTunnel$' + $name) -ErrorAction SilentlyContinue) { throw 'A CWG tunnel service already exists. Stop its original bundle first.' }

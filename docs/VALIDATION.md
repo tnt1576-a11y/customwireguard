@@ -417,6 +417,42 @@ timed rollback to the previous listeners. This comparison changes no client
 routes and starts no tunnel. Comparing across runs can suggest a protocol or
 port dependency, but a time-dependent network policy remains a possible cause.
 
+That comparison is complete. H3 on UDP 8443 again logged 36 accepted socket
+writes and no reads, with no matching packets at the server NIC. Raw UDP on 443
+passed both probes; all four request/reply packets were captured, with no kernel
+capture drops. Combined with the previous run, the failure followed the H3
+traffic across ports. This supports a traffic-format dependency, but does not
+prove where filtering occurs; the raw and H3 socket behaviors also differ.
+The original listeners were restored and the temporary rollback timer stopped.
+At the user's request, further QUIC experiments were abandoned. No compact-TLS
+probe was run against the real server, and no such setting was deployed.
+
+## Paced raw UDP (0.3.0)
+
+The next version returns to the existing authenticated raw wire format and adds
+optional outbound data pacing on each peer. A bounded FIFO limits queued delay
+and memory; late packets and over-budget arrivals are counted separately from
+socket failures and receive-queue drops. There is no extra retransmission,
+forward-error correction, cover traffic, or claim of protocol invisibility.
+The initial deployment uses 1000 kbit/s per sender and a 150 ms queue limit;
+this intentionally prioritizes a controllable test rate over maximum speed.
+
+Focused tests cover rate spacing, burst suppression, delay expiry, session
+reset, endpoint rebinding, hard queue bounds, counters, disabled pacing and
+configuration bounds. Real WireGuard channel-TUN tests also pass with pacing
+enabled, carrying IPv4/IPv6 in both directions at 1280-byte MTU over localhost.
+The first sandboxed run could not exchange loopback traffic; the same tests
+passed with normal host loopback access. No actual client VPN was started.
+
+Module verification, vet and the full Go suite passed. The exact Windows and
+Linux amd64 executables passed temporary localhost bidirectional burst tests:
+ten 1200-byte payloads arrived intact in each direction over about 100 ms at
+1000 kbit/s. Authentication, probe non-interference and socket-trace correlation
+also passed. Thirteen offline startup/routing fixtures passed both PowerShell 7
+and 5.1. The client now displays its configured sending limit; the Full-mode
+diagnostic retains process exit codes on PS5.1. Actual target-network stability
+with pacing remains unverified until the user runs the new client.
+
 ## Not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,
