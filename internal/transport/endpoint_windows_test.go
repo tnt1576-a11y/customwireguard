@@ -92,3 +92,53 @@ func TestDialEndpointBindingFailsClosed(t *testing.T) {
 		t.Fatal("accepted unsupported IPv6 binding")
 	}
 }
+
+func TestListenEndpointPinnedForQUIC(t *testing.T) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := 0
+	for _, iface := range interfaces {
+		if iface.Flags&(net.FlagLoopback|net.FlagUp) == net.FlagLoopback|net.FlagUp {
+			index = iface.Index
+			break
+		}
+	}
+	if index == 0 {
+		t.Fatal("no loopback interface")
+	}
+	server := socket(t)
+	client, err := ListenEndpoint(context.Background(), server.LocalAddr().String(), index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	raw, err := client.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected int
+	var socketErr error
+	err = raw.Control(func(fd uintptr) {
+		selected, socketErr = windows.GetsockoptInt(windows.Handle(fd), windows.IPPROTO_IP, ipUnicastIF)
+	})
+	if err != nil || socketErr != nil || selected != index {
+		t.Fatalf("unconnected socket binding failed: %d %v %v", selected, err, socketErr)
+	}
+	server.SetDeadline(time.Now().Add(time.Second))
+	client.SetDeadline(time.Now().Add(time.Second))
+	if _, err = client.WriteToUDP([]byte("quic socket"), server.LocalAddr().(*net.UDPAddr)); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 64)
+	n, peer, err := server.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.WriteToUDP(buf[:n], peer)
+	n, _, err = client.ReadFromUDP(buf)
+	if err != nil || string(buf[:n]) != "quic socket" {
+		t.Fatalf("unconnected receive: %v", err)
+	}
+}

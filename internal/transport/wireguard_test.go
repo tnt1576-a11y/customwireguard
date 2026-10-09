@@ -23,6 +23,11 @@ import (
 // Real WireGuard Noise handshakes and encrypted data over real loopback UDP.
 // Channel TUNs replace OS interfaces only; no admin privileges/routes are needed.
 func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
+	t.Run("raw", func(t *testing.T) { testRealWireGuard(t, false) })
+	t.Run("h3", func(t *testing.T) { testRealWireGuard(t, true) })
+}
+
+func testRealWireGuard(t *testing.T, h3 bool) {
 	clientTun, serverTun := tuntest.NewChannelTUN(), tuntest.NewChannelTUN()
 	clientWG := device.NewDevice(clientTun.TUN(), conn.NewStdNetBind(), device.NewLogger(device.LogLevelSilent, ""))
 	serverWG := device.NewDevice(serverTun.TUN(), conn.NewStdNetBind(), device.NewLogger(device.LogLevelSilent, ""))
@@ -65,6 +70,9 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	secret := keyString()
 	clientCfg := config.Config{Mode: "client", Listen: local.LocalAddr().String(), Endpoint: public.LocalAddr().String(), WireGuard: clientPort, Key: secret, Profile: "balanced"}
 	serverCfg := config.Config{Mode: "server", Listen: public.LocalAddr().String(), WireGuard: serverPort, Key: secret, Profile: "balanced"}
+	if h3 {
+		clientCfg, serverCfg = h3Configs(t, local.LocalAddr().String(), public.LocalAddr().String(), clientPort, serverPort)
+	}
 	if e = clientWG.IpcSet(fmt.Sprintf("public_key=%s\nendpoint=%s\n", hex.EncodeToString(serverKey.PublicKey().Bytes()), local.LocalAddr())); e != nil {
 		t.Fatal(e)
 	}
@@ -72,12 +80,18 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	defer remote.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 2)
 	cs, ss := new(Stats), new(Stats)
-	go func() { done <- RunClient(ctx, local, remote, clientCfg, cs) }()
-	go func() { done <- RunServer(ctx, public, serverCfg, ss) }()
+	if h3 {
+		go func() { done <- RunH3Client(ctx, local, clientCfg, cs, 0) }()
+		go func() { done <- RunH3Server(ctx, public, serverCfg, ss) }()
+	} else {
+		go func() { done <- RunClient(ctx, local, remote, clientCfg, cs) }()
+		go func() { done <- RunServer(ctx, public, serverCfg, ss) }()
+	}
 	defer func() {
 		cancel()
 		for i := 0; i < 2; i++ {
@@ -91,8 +105,12 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 			}
 		}
 	}()
-	for _, ipv6 := range []bool{false, true} {
-		for _, size := range []int{64, 1280} {
+	families, sizes := []bool{false, true}, []int{64, 1280}
+	if h3 {
+		families, sizes = []bool{false}, []int{64, 1088}
+	}
+	for _, ipv6 := range families {
+		for _, size := range sizes {
 			for _, reverse := range []bool{false, true} {
 				src, dst := "10.77.0.2", "10.77.0.1"
 				if ipv6 {

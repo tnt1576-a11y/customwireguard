@@ -329,6 +329,33 @@ phase loss/recovery, trace-limit abort, interrupted prompting and partial-start
 cleanup. The real load test remains user-run and pending; no transport redesign,
 pacing change, server change or actual client test was made by the assistant.
 
+## Follow-up: traced video test and HTTP/3 implementation
+
+The user completed the one-session video test. Initial idle received 4/30 ping
+replies, video received 1/30, and the final idle phase received 7/30. YouTube
+stayed loading or barely played. Tracing remained active below its record cap.
+Hash correlation matched 823/2014 outbound and 727/1794 return datagrams, with
+some shutdown-boundary uncertainty. The first unmatched outbound packet was
+about 0.912 seconds after transport start and 0.152 seconds after the first
+WireGuard input, before the video phase. Loss persisted across packet-size
+buckets. This disproves tracing as a reliable workaround; video did not initiate
+this failure. A mechanism or DPI attribution remains unproven.
+
+An alternative standard HTTP/3 CONNECT-UDP carrier is now implemented; see
+HTTP3.md for identity, MTU, protocol and operational details. Local tests cover
+real WireGuard handshakes and bidirectional IPv4 packets at the 1088-byte tunnel
+MTU, pinned TLS, authorization failure, rejection of other proxy destinations,
+concurrent-flow rejection, oversized packets in both directions and recovery.
+These localhost checks do not establish behavior on the target network.
+The exact Windows and Linux executables also passed mock-UDP forwarding and
+reconnection after a localhost server restart. Windows interface binding was
+checked on an unconnected UDP socket (the form QUIC uses). Thirteen offline
+startup fixtures passed on PowerShell 7 and Windows PowerShell 5.1, including
+H3 MTU/IPv6 rejection before routing changes. Module verification, vet and the
+full Go suite passed. Go's vulnerability scan found no affected symbols or
+imported packages; six advisories were confined to unused parts of required
+modules. This is an automated dependency check, not a security audit.
+
 ## Not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,

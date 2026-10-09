@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"path/filepath"
 )
 
 // One configuration and key pair serves one WireGuard peer. Use separate
@@ -20,6 +21,10 @@ type Config struct {
 	WireGuard string `json:"wireguard"`
 	Key       string `json:"key"`
 	Profile   string `json:"profile"`
+	Transport string `json:"transport,omitempty"`
+	TLSCert   string `json:"tls_cert,omitempty"`
+	TLSKey    string `json:"tls_key,omitempty"`
+	H3Target  string `json:"h3_target,omitempty"`
 }
 
 func Load(path string, mode string) (Config, error) {
@@ -47,6 +52,11 @@ func Load(path string, mode string) (Config, error) {
 	if err = c.Validate(mode); err != nil {
 		return Config{}, err
 	}
+	for _, p := range []*string{&c.TLSCert, &c.TLSKey} {
+		if *p != "" && !filepath.IsAbs(*p) {
+			*p = filepath.Join(filepath.Dir(path), *p)
+		}
+	}
 	return c, nil
 }
 
@@ -71,6 +81,24 @@ func (c Config) Validate(mode string) error {
 	}
 	if _, err := c.Secret(); err != nil {
 		return err
+	}
+	if c.Transport != "" && c.Transport != "raw" && c.Transport != "h3" {
+		return errors.New("transport must be raw or h3")
+	}
+	if c.Transport == "h3" {
+		if c.TLSCert == "" || (mode == "server" && c.TLSKey == "") {
+			return errors.New("h3 requires tls_cert, and server requires tls_key")
+		}
+		if mode == "client" {
+			target, err := address(c.H3Target, "h3_target")
+			if err != nil || !target.Addr().IsLoopback() || c.TLSKey != "" {
+				return errors.New("h3 client requires a literal loopback h3_target and must not contain tls_key")
+			}
+		} else if c.H3Target != "" {
+			return errors.New("h3 server uses wireguard as its only permitted target")
+		}
+	} else if c.TLSCert != "" || c.TLSKey != "" || c.H3Target != "" {
+		return errors.New("TLS and h3_target settings require transport h3")
 	}
 	if c.Profile != "balanced" && c.Profile != "minimal" {
 		return errors.New("profile must be balanced or minimal")

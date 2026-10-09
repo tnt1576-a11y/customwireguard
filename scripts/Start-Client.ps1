@@ -22,6 +22,13 @@ $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 $tunnelName = if ($Mode -eq 'Full') { 'cwg-full' } else { 'cwg-test' }
 $tunnelPath = Join-Path $bundlePath ($tunnelName + '.conf')
 if (-not (Test-Path -LiteralPath $tunnelPath)) { throw 'Missing WireGuard configuration.' }
+if ($cfg.transport -eq 'h3') {
+    $nativeText = Get-Content -LiteralPath $tunnelPath -Raw
+    if ($nativeText -notmatch '(?m)^\s*MTU\s*=\s*1088\s*$' -or $nativeText -match '(?m)^\s*(Address|AllowedIPs)\s*=.*:') {
+        throw 'HTTP/3 comparison requires MTU = 1088 and IPv4-only Address/AllowedIPs in the native WireGuard profile.'
+    }
+    Write-Host 'Transport: HTTP/3 CONNECT-UDP with pinned TLS. The preflight verifies HTTP/3 access only.'
+}
 foreach ($name in @('cwg-test','cwg-full')) {
     if (Get-Service -Name ('WireGuardTunnel$' + $name) -ErrorAction SilentlyContinue) { throw 'A CWG tunnel service already exists. Stop its original bundle first.' }
 }

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.1.5')
+param([string]$Version = '0.2.0')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?$') { throw 'Invalid version.' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -49,10 +49,12 @@ try {
     New-Item -ItemType Directory -Path $licenses | Out-Null
     Copy-Item -LiteralPath (Join-Path (Split-Path (Split-Path $go -Parent) -Parent) 'LICENSE') -Destination (Join-Path $licenses 'Go.txt')
     $env:GOOS='windows'; $env:GOARCH='amd64'
-    foreach ($module in @('golang.org/x/crypto','golang.org/x/sys')) {
+    foreach ($module in @('golang.org/x/crypto','golang.org/x/sys','golang.org/x/net','golang.org/x/text','github.com/quic-go/quic-go','github.com/quic-go/masque-go','github.com/quic-go/qpack','github.com/yosida95/uritemplate/v3','github.com/dunglas/httpsfv')) {
         $moduleDir=& $go list -m -f '{{.Dir}}' $module
         if ($LASTEXITCODE -ne 0) { throw 'Could not locate dependency license.' }
-        Copy-Item -LiteralPath (Join-Path $moduleDir 'LICENSE') -Destination (Join-Path $licenses (($module -replace '/','-') + '.txt'))
+        $licenseFile = @('LICENSE','LICENSE.md','LICENSE.txt') | ForEach-Object { Join-Path $moduleDir $_ } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (-not $licenseFile) { throw ('No dependency license found for ' + $module) }
+        Copy-Item -LiteralPath $licenseFile -Destination (Join-Path $licenses (($module -replace '/','-') + '.txt'))
     }
     $goVersion=& $go version
     [ordered]@{version=$Version;built_utc=[DateTime]::UtcNow.ToString('o');compiler=$goVersion;tests='go mod verify; go vet ./...; go test ./... -count=1';linux_runtime_tested=$false} |

@@ -1,13 +1,20 @@
 # CWG: experimental UDP transport for WireGuard
 
-CWG wraps the **complete WireGuard UDP datagram** in authenticated encryption and
+CWG now offers an experimental **HTTP/3 CONNECT-UDP transport** alongside the
+original raw UDP carrier. Both carry complete native WireGuard datagrams.
+The HTTP/3 variant uses QUIC/TLS 1.3, an exact certificate pin, authenticated
+CONNECT requests and a fixed server-side destination. See [HTTP/3 setup and
+limitations](docs/HTTP3.md). It is UDP-only; there is no TCP fallback.
+
+The original raw carrier wraps the **complete WireGuard UDP datagram** in authenticated encryption and
 variable padding. Standard WireGuard remains responsible for the VPN's keys,
 handshakes, replay protection and IP tunnel. CWG removes its exposed packet types,
 counters and exact small-packet lengths from the outer connection.
 
 This is a research prototype for testing a network where UDP is selectively
 filtered. **Successful local tests do not establish DPI evasion on that network.**
-The traffic looks like unfamiliar encrypted UDP, not real QUIC or HTTPS. IP
+The original carrier looks like unfamiliar encrypted UDP; the new carrier is
+real HTTP/3, but does not reproduce a browser's traffic fingerprint. IP
 addresses, lengths, timing and volume remain observable. No design here promises
 that a server address will avoid blocking. CWG has not had an independent security
 audit and is not a drop-in replacement for a mature VPN product.
@@ -34,10 +41,11 @@ audit and is not a drop-in replacement for a mature VPN product.
 
 One server process/outer secret serves **one active client**. Additional clients
 need separate instances, ports, WireGuard configurations and secrets. Starting a
-second client with the same secret replaces the first association. The `probe`
+second raw client with the same secret replaces the first association. HTTP/3
+rejects simultaneous flows instead. The `probe`
 command does not replace it.
 
-## First deployment
+## First deployment (original raw transport)
 
 The first deployment should use a server you control, with an otherwise reachable
 IPv4 address. For a new deployment, inspect the server's

@@ -72,5 +72,19 @@ try {
         } elseif ('-interface-index' -in $global:CwgArguments -or $global:CwgRouteCreated -or $state.TransportInterfaceIndex -ne 0) { throw 'Test mode unexpectedly pinned or changed routes' }
         Write-Host ('PASS: ' + $case)
     }
+    Set-Content -LiteralPath (Join-Path $fixture 'client.json') -Value '{"endpoint":"203.0.113.1:443","transport":"h3"}'
+    foreach ($case in @('H3-valid','H3-MTU','H3-IPv6')) {
+        $global:CwgCase=$case; $global:CwgArguments=@(); $global:CwgPhysical=$true; $global:CwgExisting=$false; $global:CwgRouteCreated=$false
+        $mtu=if ($case -eq 'H3-MTU') {1280} else {1088}
+        $address=if ($case -eq 'H3-IPv6') {'10.77.0.2/32, fd77:77:77::2/128'} else {'10.77.0.2/32'}
+        Set-Content -LiteralPath (Join-Path $fixture 'cwg-full.conf') -Value "[Interface]`nMTU = $mtu`nAddress = $address`n[Peer]`nAllowedIPs = 0.0.0.0/1, 128.0.0.0/1"
+        if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath }
+        $failed=$false
+        try { & (Join-Path $fixture 'Start-Client.ps1') -Bundle $fixture -Mode Full -Executable (Join-Path $fixture 'fake-cwg.ps1') | Out-Null } catch { if ($case -eq 'H3-valid') { throw }; $failed=$true }
+        if ($case -eq 'H3-valid') {
+            if (-not $global:CwgArguments.Count -or -not $global:CwgRouteCreated) { throw 'H3 start did not run' }
+        } elseif (-not $failed -or $global:CwgArguments.Count -or $global:CwgRouteCreated -or (Test-Path -LiteralPath $statePath)) { throw ('H3 failed to reject unsafe native profile: ' + $case) }
+        Write-Host ('PASS: ' + $case)
+    }
 } finally { $env:ProgramFiles=$originalProgramFiles }
-Write-Host 'Ten offline routing helper cases passed. No network or system state changed.'
+Write-Host 'Thirteen offline routing helper cases passed. No network or system state changed.'

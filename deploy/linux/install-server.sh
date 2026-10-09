@@ -29,6 +29,7 @@ python3 - "$bundle" <<'PY'
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1])
 c = json.loads((p / 'server.json').read_text())
+assert c.get('transport', 'raw') in ('', 'raw'), 'This installer is raw-only; see docs/HTTP3.md for H3 deployment'
 assert c['mode'] == 'server' and c['wireguard'] == '127.0.0.1:51820', 'Unexpected backend'
 assert c['listen'].startswith('0.0.0.0:') and int(c['listen'].split(':')[1]) != 51820, 'Unexpected public listener'
 text = (p / 'cwg0.conf').read_text()

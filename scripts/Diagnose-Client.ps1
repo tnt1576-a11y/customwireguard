@@ -42,7 +42,11 @@ Write-Report ((Get-NetIPInterface -InterfaceAlias 'cwg-full' | Select-Object Add
 Write-Report ((Get-DnsClientServerAddress -InterfaceAlias 'cwg-full' | Select-Object AddressFamily,ServerAddresses | Format-Table -AutoSize | Out-String).TrimEnd())
 
 Invoke-DiagnosticCommand 'tunnel-small-ping' $pingPath '-4 -n 4 -w 1500 -l 32 10.77.0.1'
-Invoke-DiagnosticCommand 'tunnel-large-ping' $pingPath '-4 -n 4 -w 1500 -f -l 1200 10.77.0.1'
+$tunnelMTU = [int](Get-NetIPInterface -InterfaceAlias 'cwg-full' -AddressFamily IPv4 -ErrorAction Stop | Select-Object -First 1).NlMtu
+if ($tunnelMTU -lt 68) { throw 'Cannot determine a usable IPv4 tunnel MTU.' }
+$largePayload = [Math]::Min(1200, $tunnelMTU - 28)
+Write-Report ('Large ping payload: ' + $largePayload + ' bytes; tunnel MTU: ' + $tunnelMTU)
+Invoke-DiagnosticCommand 'tunnel-large-ping' $pingPath ('-4 -n 4 -w 1500 -f -l ' + $largePayload + ' 10.77.0.1')
 Invoke-DiagnosticCommand 'internet-ping' $pingPath '-4 -n 3 -w 1500 1.1.1.1'
 foreach ($dnsServer in @('System','1.1.1.1')) {
     Write-Report ("`n--- DNS via " + $dnsServer + ' ---')

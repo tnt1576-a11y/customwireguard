@@ -18,7 +18,7 @@ import (
 	"customwireguard/internal/transport"
 )
 
-var version = "0.1.5-dev"
+var version = "0.2.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -87,6 +87,16 @@ func run(args []string) error {
 		fmt.Println("Private client/server bundle created. No keys printed. Read PRIVATE-README.txt.")
 		return nil
 	}
+	if command == "tls-init" {
+		if *out == "" || *endpoint == "" {
+			return errors.New("tls-init requires -out and -endpoint")
+		}
+		if err := config.InitializeTLS(*out, *endpoint); err != nil {
+			return err
+		}
+		fmt.Println("Private TLS identity created. Copy only server-cert.pem to the client; keep server-key.pem on the server.")
+		return nil
+	}
 	if command != "client" && command != "server" && command != "probe" && command != "session-probe" && command != "replay-probe" && command != "check" {
 		return errors.New("unknown command; use cwg help")
 	}
@@ -111,6 +121,18 @@ func run(args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	if cfg.Transport == "h3" {
+		if command == "session-probe" || command == "replay-probe" || *probeSizes != "" || *probeRate != 20 {
+			return errors.New("raw UDP diagnostic options are not supported by HTTP/3")
+		}
+		if command == "probe" {
+			result, err := transport.ProbeH3(ctx, cfg, *count)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(os.Stdout).Encode(result)
+		}
+	}
 	if command == "replay-probe" {
 		if *patternPath == "" {
 			return errors.New("replay-probe requires -pattern")
@@ -169,6 +191,12 @@ func run(args []string) error {
 	}
 	go report(ctx, stats)
 	fmt.Fprintln(os.Stderr, "cwg", version, command, "started; experimental transport; one WireGuard peer per instance")
+	if cfg.Transport == "h3" {
+		if command == "server" {
+			return transport.RunH3Server(ctx, local, cfg, stats)
+		}
+		return transport.RunH3Client(ctx, local, cfg, stats, *interfaceIndex)
+	}
 	if command == "server" {
 		return transport.RunServer(ctx, local, cfg, stats, *probeRate)
 	}
@@ -220,6 +248,7 @@ func usage() {
 	fmt.Println(`CWG - experimental authenticated UDP transport for WireGuard
 
   cwg init -endpoint SERVER_IP:PORT -out NEW_PRIVATE_DIRECTORY
+  cwg tls-init -endpoint SERVER_IP:PORT -out NEW_PRIVATE_TLS_DIRECTORY
   cwg check -config FILE.json
   cwg server -config server.json
   cwg client -config client.json
