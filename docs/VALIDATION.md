@@ -1,6 +1,7 @@
 # Local validation
 
-Prepared on 2026-10-09. Live ISP and Linux server verification is pending.
+Updated on 2026-10-09. Local and user-run server/path results are recorded below;
+reliable Full-mode internet access remains unresolved.
 
 ## Passed locally
 
@@ -259,7 +260,29 @@ real network, routes or services.
 The wire format and cryptography were unchanged between the failing and working
 cases. The failure is associated with the Full-mode settings, but the exact
 DNS/IPv6, local-filter or network-path interaction has not been identified.
-Longer normal-use testing of the promoted profile remains user-run.
+The subsequent user-run normal test failed. The configuration was byte-identical
+to the successful IPv4-only comparison. Its endpoint bypass and IPv4 tunnel
+routes were present, yet all 11 diagnostic private/public pings failed. Explicit
+DNS and numeric-IP HTTPS also timed out, so this is not only a name-resolution
+failure. The user's separate ping showed a few replies followed by timeouts.
+Client counters recorded 609 authenticated data packets received over about 90
+seconds, with zero rejections, socket errors or queue drops. The server stayed
+active without restarts or new CWG/Linux UDP errors. This does not show a complete
+outer-connection cutoff, and invalidates treating the earlier short pass as a
+configuration fix. No client packet trace was enabled for this normal run, so
+an exact end-to-end loss percentage cannot be computed from these counters.
+
+WireSock's physical-adapter filter remains attached. A new user-run helper,
+Compare-WireSockFilter.ps1, prepares an attached/detached/restored comparison
+using the identical Full configuration, tracing all phases. It changes only
+nt_ndiswgc, requires an explicit opt-in flag, writes recovery state before
+detaching, and restores by adapter GUID in normal and error paths. RestoreOnly
+can retry after interruption. Ten offline fixtures passed PowerShell 7 and
+Windows PowerShell 5.1, including renamed-adapter restoration, an exception
+after detachment took effect, diagnosis/routing failures, and failed restoration
+with saved-state recovery. The actual binding has not been changed by the
+assistant. The real comparison is pending; local filtering and upstream DPI
+remain hypotheses, not established causes.
 
 ## Not verified here
 

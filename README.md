@@ -140,8 +140,20 @@ exists, or it cannot inspect that state. It does not change adapter bindings.
 This is a startup check, not continuous leak protection; stop before changing
 network settings. The deployment-specific client kit uses this profile with DNS
 retained after it passed the user's comparison test. Generated bundles retain
-the original dual-stack default. See the measured results in
+the original dual-stack default. A subsequent normal-use test failed with the
+identical profile, so this is **not a verified fix**. See the measured results in
 [validation](docs/VALIDATION.md).
+
+Where WireSock's `nt_ndiswgc` filter is attached to the physical adapter,
+`scripts/Compare-WireSockFilter.ps1 -Bundle PATH -TemporarilyUnbindWireSock`
+provides an explicit, user-run comparison: Full mode with the filter attached,
+temporarily detached, then restored. All three phases copy the same configuration,
+save packet metadata and DNS/HTTPS/ping results, and stop their own tunnel. The
+binding change may briefly interrupt the physical connection; run locally with
+other VPNs disconnected and keep PowerShell open. Recovery state is written
+before the change; `-RestoreOnly` retries filter restoration after interruption.
+The helper identifies the adapter by GUID and changes only the WireSock binding.
+This tests a possible local cause; the filter's presence is not evidence of fault.
 
 ## Transport settings and limits
 
