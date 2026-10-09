@@ -398,7 +398,24 @@ successful socket operations; writes do not prove delivery. Local tests verify
 normal and interface-bound handshakes, capability preservation, and retained
 writes when the peer is silent. Measure-H3Socket.ps1 prepares default/bound/
 default H3 preflights plus a raw control, without Packet Monitor or a tunnel.
-Seven offline helper fixtures passed PS7 and PS5.1. The real test is pending.
+Seven offline helper fixtures passed PS7 and PS5.1.
+
+The user completed the socket comparison. Each of the three H3 attempts logged
+12 accepted writes of 1200 bytes, zero reads and zero write errors before an
+eight-second timeout. Explicit physical-interface binding did not change the
+result. None of these 36 payload hashes appeared at the server NIC. The raw
+control passed two probes (256 and 512 bytes), and the server captured all four
+request/reply packets with zero kernel capture drops. This places the observed
+loss after socket acceptance and before server capture, without distinguishing
+local filtering, router/ISP filtering, transit or upstream server filtering.
+It does not identify DPI. Protocol and destination port remain confounded.
+
+The next comparison exchanges the existing protocols' public ports: H3 on
+8443 and raw on 443, using separate probe-only client configurations, unchanged
+keys, and the same pinned certificate. Temporary server overrides have a
+timed rollback to the previous listeners. This comparison changes no client
+routes and starts no tunnel. Comparing across runs can suggest a protocol or
+port dependency, but a time-dependent network policy remains a possible cause.
 
 ## Not verified here
 
