@@ -808,6 +808,40 @@ The next USER-RUN test is Measure-AdaptivePerformance.ps1 without -HighRate:
 ping throughout. Compare queue expirations and loaded latency with the completed
 0.5.4 run. Target-network improvement remains unverified until that comparison.
 
+## Completed 0.5.5 target-network comparison (2026-10-10)
+
+The user completed eight verified transfers totaling 281.25 MB. All 339 pings
+succeeded; median/p95/max were 96/110/124 ms. The idle-before median was 96 ms,
+as were all loaded-phase medians. Download25/50 delivered 24.52/49.05 Mbps,
+parallel downloads totaled 49.06 Mbps, bursty/smooth uploads were 23.80/23.68
+Mbps and duplex was 23.70 up/24.53 down. This run's baseline path RTT was higher
+than the previous run, so absolute RTT alone does not establish a code regression.
+
+Client queue expirations were zero, but 27 capacity drops remained during the
+50 Mbps download. There was one loss-triggered backoff during parallel download,
+69 expired outer requests and no delay-triggered backoffs. Therefore this run
+does not directly exercise or prove the delay-to-timeout suppression fix. There
+was one uninterrupted association, no socket errors and no reader handoff drops
+on either peer. Active server queue drops and observed kernel UDP error deltas
+were zero; post-stop expiry is excluded.
+
+Server-observed TCP retransmissions were zero at download25 and duplex, 865 at
+download50 and 26/12 on the parallel downloads. All sampled outer hashes matched,
+but one native-upload sample during download50 and one native-download sample
+during parallel download were unmatched. The trace is sampled 1/128 and cannot
+prove zero outer loss or uniquely locate either missing native sample. Stability
+remains incomplete despite successful pings and transfers. Remote testing on a
+separate LAN PC is being prepared to make subsequent comparisons repeatable.
+
+## Remote access setup validation
+
+The setup/revocation scripts parse on Windows PowerShell 5.1 and PowerShell 7.
+Offline preflight fixtures cover WhatIf, wrong controller PC, virtual adapter,
+routed management path, existing SSH service and nonprivate address rejection.
+No accounts, services, firewall rules or network settings were changed by those
+fixtures. Actual Windows 10 installation, SSH authentication and LAN continuity
+during a VPN test remain unverified until the user runs the setup package.
+
 ## Still not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,

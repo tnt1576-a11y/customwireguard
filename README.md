@@ -14,6 +14,7 @@ median/p95 of 91/100 ms, but retained some burst expirations and TCP retransmits
 these are short-run results, not a capacity or reliability guarantee.
 See [validation](docs/VALIDATION.md), [DPI limits and resilience](docs/RESILIENCE.md),
 and [multi-user and application split-tunnel follow-ups](docs/FOLLOW-UP.md).
+For a separate Windows test PC, see [LAN remote test access](docs/REMOTE-TESTING.md).
 Version 0.5.0 adds optional adaptive request scheduling, a larger in-flight
 window, short native-data queue deadlines and sampled diagnostics. It preserves
 the same authenticated version-2 datagrams and one same-sized reply per request.
