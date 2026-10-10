@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"time"
@@ -44,6 +45,14 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 	if err != nil {
 		conn.Close()
 		return err
+	}
+	// Kernel WireGuard can deliver a batch of native packets at once. Match
+	// the public socket's receive-buffer request before starting the reader;
+	// the OS default can overflow before our bounded userspace queue sees it.
+	if err := backend.SetReadBuffer(2 << 20); err != nil {
+		backend.Close()
+		conn.Close()
+		return fmt.Errorf("set WireGuard backend receive buffer: %w", err)
 	}
 	channels, cleanup := readers(ctx, stats, conn, backend)
 	defer cleanup()

@@ -549,9 +549,56 @@ for bulk traffic, not a claim that every packet retains a 60 ms queue limit.
 
 Focused tests cover bounds, starvation prevention, per-class expiry, startup
 rebasing, native WireGuard handshakes, smooth upload integrity and cancellation.
-The user-run 50 Mbit/s slowdown is still unexplained. Per-connection TCP
-telemetry and single-versus-parallel downloads are prepared to distinguish
+The first user-run 50 Mbit/s slowdown was unexplained at this release.
+Per-connection TCP telemetry and single-versus-parallel downloads distinguish
 congestion/retransmission, receive-window, application pacing and carrier limits.
+
+The subsequent user-run 0.5.1 comparison completed and verified all eight
+transfers (281.25 MB). The single 50 Mbit/s download reached 45.25 Mbit/s,
+compared with 22.74 Mbit/s previously. The first 25 Mbit/s download was slower
+at 16.02 Mbit/s. Parallel downloads averaged 22.13 and 20.71 Mbit/s individually;
+their different completion times mean adding those averages is not a measured
+aggregate over a common interval. Bursty and smooth 25 Mbit/s uploads reached
+23.43 and 23.66 Mbit/s. Simultaneous upload/download reached 23.69/22.72 Mbit/s.
+All 386 tunnel pings succeeded: median 94 ms, p95 112 ms, maximum 128 ms.
+
+The client recorded 580 native queue expirations, all during the deliberately
+bursty upload; smooth upload and duplex recorded none. The previous run recorded
+3219 expirations with a different transfer mix, so this is not a controlled
+percentage improvement. Server userspace native queues recorded zero drops
+during active transfers. Small-packet queue delay maxima were 10.38 ms on the
+client and 14.119 ms on the server; bulk maxima were 199.949/146.897 ms.
+There was one client association, one rate backoff and 58 expired outer requests,
+with no socket errors. All sampled outer hashes matched during transfer phases;
+1/128 sampling cannot establish zero path loss.
+
+Linux UDP receive-buffer errors increased by 1023 during the test. A subsequent
+per-socket inspection located all 1023 drops on CWG's loopback WireGuard backend
+socket, whose receive buffer was 212992 bytes. The public UDP socket recorded
+zero drops. The increases of 443, 332 and 248 occurred during the single
+50 Mbit/s download, parallel downloads and duplex respectively. Server TCP
+retransmission counts in those phases were 445, 335 and 248, closely matching
+the local socket losses. This identifies a local source of retransmissions
+that userspace counters and post-read traces cannot observe.
+
+The first 25 Mbit/s download had one TCP retransmission and a prolonged small
+congestion window; there were no server UDP receive-buffer drops in that phase.
+Its precise trigger remains unresolved. Recorded receive-window limitations
+were at most 3.42% of TCP busy time across downloads, and send-buffer-limited
+time was zero. These results do not establish the cause of the earlier run's
+50 Mbit/s slowdown or long-term network filtering behavior.
+
+## Backend receive buffer correction (0.5.2)
+
+The server now requests a 2 MiB receive buffer for its loopback WireGuard
+backend before starting its reader, matching the request on the public socket.
+Failure to set the buffer produces a startup error. The OS can cap this request;
+Linux reports double the requested size to include accounting overhead (see
+[socket(7)](https://man7.org/linux/man-pages/man7/socket.7.html)).
+No rate, queue deadline, wire format, client scheduler or TCP tuning changes
+are included. A repeated user-run comparison is needed to measure the effect
+on kernel drops and download recovery. Bursty uploads can still exceed the
+200 ms client queue deadline; this server correction does not fix those drops.
 
 ## Still not verified here
 
