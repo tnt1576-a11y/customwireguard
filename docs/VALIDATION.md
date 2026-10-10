@@ -730,6 +730,84 @@ retransmissions. Real-network burst loss, speed and latency remain unverified
 for this version until that test. Per-application split tunneling is recorded
 separately in FOLLOW-UP.md; no WireSock policy or adapter changes were made.
 
+## Completed 0.5.4 target-network comparison (2026-10-10)
+
+The user completed the higher-rate trial with nine verified transfers totaling
+337.5 MB. All 372 pings succeeded: median 91 ms, p95 100 ms, maximum 111 ms.
+Idle-before median/p95 were 91/94 ms, the 75 Mbps download phase was 91/98 ms,
+bursty upload 91/101 ms and duplex 91/100 ms. The 25/50/75 Mbps downloads
+delivered 24.54/49.09/66.56 Mbps. Parallel downloads totaled 49.05 Mbps;
+bursty/smooth uploads delivered 23.91/23.75 Mbps. Duplex was 23.78 Mbps up
+and 24.55 Mbps down. These are short transfer measurements on one client.
+
+Active-window server deltas showed no exchange expiry/full drops, reader drops,
+or kernel UDP errors. Server expiry after the client stopped is excluded.
+The client recorded no reader/full drops, but 48 bulk expirations immediately
+after two rate backoffs during bursty upload. It recorded 46 outer-request
+expirations, one association and no socket errors. All sampled hashes matched
+within measured phases; the uncapped trace samples 1/128 and cannot establish
+zero path loss. The two backoffs may reflect feedback from the same disturbance;
+the old counters cannot establish their exact trigger.
+
+Server TCP download retransmissions were zero at 25/50 Mbps and for both parallel
+downloads, 219 at the 75 Mbps target and 161 during duplex. The high-rate sender
+was receive-window-limited for 91.67 percent of its recorded busy time. Burst
+upload had 2712 out-of-order receives. Loss and reordering can both produce TCP
+retransmits; these values do not establish DPI detection. Server upload telemetry
+describes its own sending side and cannot certify zero client retransmissions.
+
+The server inventory was one vCPU and about 967 MiB RAM, with approximately
+660 MiB available when read. CWG's resident service accounting was about 12.9 MiB
+(peak 15.4 MiB). Its cumulative 23.9 CPU seconds since deployment lack an exact
+test baseline and exclude WireGuard kernel work. They are not a multi-user
+capacity measurement. The current instance supports one active client; the
+two-to-three-user requirement and fair-sharing validation are in FOLLOW-UP.md.
+
+## 0.5.5 stability change
+
+Delay decisions now use feedback from requests sent at the current reduced
+rate. Older replies still deliver payloads and update RTT, and all old timeouts
+still retire flight slots and count as expirations. After a delay-triggered
+reduction, old timeouts cannot trigger another cut for the same queued flight.
+Loss-only backoff retains the previous conservative timeout response. Fresh
+delay or loss still reduces the rate.
+Reason-specific backoff and prior-flight counters make that distinction visible.
+Sending limits, queues, priority and encrypted packet format are unchanged.
+
+The final release passed module verification, vet and the complete Go suite
+(transport tests 55.856 seconds). Deterministic regressions cover old delay
+feedback, old timeout accounting after a delay cut, new loss/delay backoff,
+conservative loss-only response, mixed-flight expiry and bounded storage.
+Exact Windows and Linux amd64 binaries delivered all 18000 burst packets in
+each direction with 45 ms simulated one-way delay; all accompanying small
+packets arrived. Their small-packet one-way p95 was 47.54/48.03 ms on Windows
+and 47.11/47.10 ms on Linux. Bulk one-way p95 was 200.75/218.38 ms on Windows
+and 287.94/301.30 ms on Linux. This preserves priority, not uniformly low bulk
+latency. No real Windows VPN, routes or adapter settings were changed by QA.
+
+With a simulated 40 Mbps outer link and 20 ms bounded link queue, both versions
+still lost most of the deliberately overloaded bulk burst: 77.34/77.98 percent
+on 0.5.4 versus 77.56/78.19 percent on the final candidate. All small packets
+arrived. Small-packet one-way p95 was 65.21/49.09 ms versus 65.34/48.17 ms;
+candidate upload maximum was 105.59 ms versus 88.61 ms. Relay drops were
+3480 versus 3720. These single-run comparisons do not prove equivalence or
+improvement under overload. They show the remaining limitation explicitly.
+
+An earlier unshipped candidate suppressed old timeouts after every kind of cut.
+It prolonged overload, with 8484 relay drops versus 2980 in that comparison,
+so timeout suppression was narrowed to delay-triggered reductions. Exact-artifact
+smoke checks passed payload integrity, authentication, unauthenticated silence,
+association preservation and trace correlation. One Linux smoke attempt exposed
+a test race while comparing two still-growing traces; the test now takes a fixed
+client snapshot and allows up to two seconds for server records to arrive,
+without dropping unmatched hashes. The corrected test passed on both platforms.
+Linux arm64 was cross-compiled only; race-detector limitations remain below.
+
+The next USER-RUN test is Measure-AdaptivePerformance.ps1 without -HighRate:
+25/50 Mbps downloads, parallel download, bursty/smooth upload and duplex, with
+ping throughout. Compare queue expirations and loaded latency with the completed
+0.5.4 run. Target-network improvement remains unverified until that comparison.
+
 ## Still not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,

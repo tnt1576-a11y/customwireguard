@@ -121,14 +121,27 @@ def main():
                 pass
             for process in processes:
                 assert process.poll() is None, 'Transport stopped unexpectedly'
-            traces = {mode: [json.loads(line) for line in (root / f'{mode}-packets.jsonl').read_text().splitlines()]
-                      for mode in ('client', 'server')}
+            def read_trace(mode):
+                # The peers are still writing. Ignore an unfinished final line;
+                # compare a fixed client snapshot with a draining server trace.
+                complete = (root / f'{mode}-packets.jsonl').read_bytes().split(b'\n')[:-1]
+                return [json.loads(line) for line in complete if line]
+            traces = {'client': read_trace('client')}
             def hashes(mode, event, field, value):
                 return {r['sha256'] for r in traces[mode] if r['event'] == event and r.get(field) == value}
-            assert hashes('client', 'write', 'remote', server_address) <= hashes('server', 'read', 'local', server_address), 'Outer upload trace mismatch'
-            assert hashes('client', 'read', 'remote', server_address) <= hashes('server', 'write', 'local', server_address), 'Outer download trace mismatch'
-            assert hashes('client', 'read', 'local', client_address) <= hashes('server', 'write', 'remote', address(backend)), 'Native upload trace mismatch'
-            assert hashes('client', 'write', 'local', client_address) <= hashes('server', 'read', 'remote', address(backend)), 'Native download trace mismatch'
+            deadline = time.monotonic() + 2
+            while True:
+                traces['server'] = read_trace('server')
+                unmatched = {
+                    'Outer upload': hashes('client', 'write', 'remote', server_address) - hashes('server', 'read', 'local', server_address),
+                    'Outer download': hashes('client', 'read', 'remote', server_address) - hashes('server', 'write', 'local', server_address),
+                    'Native upload': hashes('client', 'read', 'local', client_address) - hashes('server', 'write', 'remote', address(backend)),
+                    'Native download': hashes('client', 'write', 'local', client_address) - hashes('server', 'read', 'remote', address(backend)),
+                }
+                if not any(unmatched.values()):
+                    break
+                assert time.monotonic() < deadline, 'Trace mismatch: ' + str({k: len(v) for k, v in unmatched.items() if v})
+                time.sleep(.01)
             assert hashlib.sha256(original).hexdigest() in hashes('client', 'read', 'local', client_address), 'Missing known test packet in trace'
             print(json.dumps({'exact_executable': str(exe), 'transport': transport, 'roundtrip_sizes': sizes,
                               'probe': result, 'unauthenticated_silence': True,

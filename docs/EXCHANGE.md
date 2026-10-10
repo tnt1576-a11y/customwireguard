@@ -1,4 +1,32 @@
-# Experimental request/reply UDP (0.4.0 through 0.5.4)
+# Experimental request/reply UDP (0.4.0 through 0.5.5)
+
+## Congestion feedback in 0.5.5
+
+A rate reduction now marks the send-time boundary of the previous flight.
+Replies for requests sent before that boundary still count as deliveries,
+release their in-flight slots and deliver any accepted native payload. Their
+RTT remains observable, but does not justify another delay cut or growth.
+
+When a reduction was triggered by delay, requests sent before that reduction
+also cannot trigger another cut through later timeouts. Those timeouts still
+retire slots and count as expirations. Loss-only reductions retain the prior
+conservative timeout response; suppressing their older losses prolonged overload
+in a constrained-link experiment. Fresh delay and loss still reduce the rate,
+even during the growth cooldown. This is feedback accounting, not a blind period
+that ignores new congestion.
+
+`exchange_prior_flight_replies` and `exchange_prior_flight_expired` identify
+such old feedback (the expiry counter applies only after a delay cut).
+`exchange_loss_backoffs` and `exchange_delay_backoffs`
+identify the trigger; both may increment for one backoff when both conditions
+hold. `exchange_backoffs` still counts decisions and `exchange_expired` still
+counts every request timeout. These counters do not identify an ISP's intent.
+
+The 9000 requests/s ceiling, pacing, queue capacity, 350 ms bulk deadline,
+60 ms small-packet deadline, wire format and encryption are unchanged. The next
+user-run comparison omits `-HighRate`, focusing on 25/50 Mbps load, upload
+bursts, duplex and loaded ping. Local controller regression tests cannot prove
+the cause of a past ISP disturbance or a future improvement on that path.
 
 ## Burst recovery and headroom in 0.5.4
 

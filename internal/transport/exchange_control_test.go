@@ -74,6 +74,116 @@ func TestAdaptiveDoesNotGrowWithoutReplies(t *testing.T) {
 	}
 }
 
+func TestAdaptiveReductionWaitsForNewFlightFeedback(t *testing.T) {
+	start := time.Unix(1000, 0)
+	for _, cause := range []string{"delay", "loss"} {
+		t.Run(cause, func(t *testing.T) {
+			s := new(Stats)
+			c := newExchangeControl(200, 9000, start, s)
+			c.rate, c.srtt, c.minRTT = 9000, 90*time.Millisecond, 90*time.Millisecond
+			cut := start.Add(200 * time.Millisecond)
+			for i := 0; i < 100; i++ {
+				c.reply(cut, 130*time.Millisecond, true, true)
+			}
+			c.update(cut, true)
+			if c.rate != 6300 || s.ExchangeDelayBackoffs.Load() != 1 {
+				t.Fatal("first delay did not reduce rate", c.rate)
+			}
+			// These losses and slow replies belong to the pre-reduction flight.
+			// They may outlive the growth cooldown, so a timer alone is not enough.
+			f := new(exchangeFlights)
+			for i := uint64(1); i <= 46; i++ {
+				f.add(i, cut.Add(-time.Millisecond), 1400)
+			}
+			now := cut.Add(500 * time.Millisecond)
+			total, current := f.expire(now, 300*time.Millisecond, c.delayReduction)
+			if total != 46 || current != 0 || f.count != 0 {
+				t.Fatal("old flight was not fully retired", total, current, f.count)
+			}
+			c.lost += current
+			for i := 0; i < 100; i++ {
+				c.reply(now, 501*time.Millisecond, true, true)
+			}
+			c.update(now, true)
+			if c.rate != 6300 || s.ExchangeBackoffs.Load() != 1 || s.ExchangePriorFlightReplies.Load() != 100 {
+				t.Fatal("old feedback changed the new rate", c.rate, s.ExchangeBackoffs.Load())
+			}
+			// Continued congestion among requests sent at the reduced rate must
+			// still cut the rate; there is no blind backoff cooldown.
+			now = now.Add(time.Second)
+			if cause == "loss" {
+				for i := uint64(47); i <= 66; i++ {
+					f.add(i, cut, 1400) // Equality belongs to the new flight.
+				}
+				total, current = f.expire(now, 300*time.Millisecond, c.delayReduction)
+				if total != 20 || current != total {
+					t.Fatal("fresh loss suppressed", total, current)
+				}
+				c.lost += current
+			} else {
+				for i := 0; i < 100; i++ {
+					c.reply(now, 130*time.Millisecond, true, true)
+				}
+			}
+			c.update(now, true)
+			if c.rate != 4410 || s.ExchangeBackoffs.Load() != 2 {
+				t.Fatal("fresh congestion did not reduce rate", c.rate)
+			}
+			if cause == "loss" && s.ExchangeLossBackoffs.Load() != 1 {
+				t.Fatal("loss reason missing")
+			}
+			if cause == "delay" && s.ExchangeDelayBackoffs.Load() != 2 {
+				t.Fatal("delay reason missing")
+			}
+		})
+	}
+}
+
+func TestAdaptiveMixedFlightExpiryKeepsAccountingAndBounds(t *testing.T) {
+	now := time.Unix(1000, 0)
+	cut := now.Add(time.Millisecond)
+	f := new(exchangeFlights)
+	f.add(1, now, 1400)
+	f.add(2, cut, 1400)
+	f.add(3, cut.Add(time.Millisecond), 1400)
+	f.add(4, now.Add(time.Second), 1400)
+	if _, ok := f.take(3, 1400); !ok {
+		t.Fatal("reordered reply rejected")
+	}
+	if total, current := f.expire(now.Add(time.Second), 300*time.Millisecond, cut); total != 2 || current != 1 || f.count != 1 {
+		t.Fatal("mixed expiry accounting", total, current, f.count)
+	}
+	if total, current := f.expire(now.Add(2*time.Second), 300*time.Millisecond, cut); total != 1 || current != 1 || f.count != 0 {
+		t.Fatal("blackout retained flights", total, current, f.count)
+	}
+}
+
+func TestAdaptiveLossOnlyRetainsConservativeTimeoutResponse(t *testing.T) {
+	now := time.Unix(1000, 0)
+	c := newExchangeControl(200, 9000, now, new(Stats))
+	c.rate, c.srtt, c.minRTT = 9000, 90*time.Millisecond, 90*time.Millisecond
+	f := new(exchangeFlights)
+	for i := uint64(1); i <= 20; i++ {
+		f.add(i, now, 1400)
+	}
+	c.lost = 20
+	c.update(now.Add(100*time.Millisecond), true)
+	if c.rate != 6300 || !c.delayReduction.IsZero() {
+		t.Fatal("loss backoff masked later losses")
+	}
+	// A later batch of losses, with no preceding delay signal, must retain the
+	// previous conservative response even if sent before the first loss cut.
+	total, current := f.expire(now.Add(time.Second), c.timeout(), c.delayReduction)
+	if total != 20 || current != 20 {
+		t.Fatal("loss-only feedback suppressed", total, current)
+	}
+	c.lost += current
+	c.update(now.Add(time.Second), true)
+	if c.rate != 4410 {
+		t.Fatal("persistent loss did not back off", c.rate)
+	}
+}
+
 func TestAdaptiveResumesOnlyRecentDeliveredCapacity(t *testing.T) {
 	now := time.Unix(1000, 0)
 	s := new(Stats)
@@ -208,8 +318,8 @@ func TestAdaptiveFlightsBoundExpiryAndReorder(t *testing.T) {
 	if _, ok := f.take(2, 1402); ok {
 		t.Fatal("duplicate response accepted")
 	}
-	if n := f.expire(now.Add(time.Second), 300*time.Millisecond); n != 16383 || f.count != 0 {
-		t.Fatal("expiry count", n, f.count)
+	if n, current := f.expire(now.Add(time.Second), 300*time.Millisecond, time.Time{}); n != 16383 || current != n || f.count != 0 {
+		t.Fatal("expiry count", n, current, f.count)
 	}
 	seq := uint64(32770)
 	f.add(seq, now.Add(time.Second), 1402)

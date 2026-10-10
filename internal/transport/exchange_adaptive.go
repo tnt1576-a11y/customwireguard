@@ -101,9 +101,10 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			nextHello = now.Add(time.Duration(wire.RandomBetween(1700, 3000)) * time.Millisecond)
 		case <-pollC:
 			now := time.Now()
-			lost := flights.expire(now, control.timeout())
-			control.lost += lost
+			lost, currentLost := flights.expire(now, control.timeout(), control.delayReduction)
+			control.lost += currentLost
 			stats.ExchangeExpired.Add(uint64(lost))
+			stats.ExchangePriorFlightExpired.Add(uint64(lost - currentLost))
 			upload.expire(now)
 			control.update(now, upload.length() > 0)
 			rate := control.rate

@@ -1,5 +1,24 @@
 # Follow-up requirements
 
+## Two or three independent users
+
+Target workload: at most two or three people gaming, browsing, streaming video
+or movies, and using social media. Stability and loaded latency take precedence
+over higher single-client speed. The current server has one active client
+association per instance; another authenticated client replaces that association.
+Sharing the current client bundle is not multi-user support.
+
+Implement separate outer credentials, WireGuard keys/peers and tunnel addresses,
+bounded per-client session and replay state, and fair per-client queues under an
+aggregate rate limit on the existing UDP listener. Retain authentication before
+replying or allocating expensive state. Test two clients first, then three, with
+one streaming or transferring while the others send game/voice-sized traffic.
+Measure aggregate CPU including kernel work, packet loss, loaded ping, memory,
+outer bandwidth and reconnects. The observed server has one vCPU and about 1 GB
+RAM; no multi-client capacity claim is established by the single-client result.
+
+This is a recorded requirement, not an implemented feature of 0.5.5.
+
 ## Per-application split tunneling on Windows
 
 After throughput and burst handling are validated, support selecting applications

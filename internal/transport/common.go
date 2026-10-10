@@ -16,42 +16,46 @@ import (
 
 type Stats struct {
 	// Set before starting any readers; immutable for the run. Nil disables it.
-	Trace                     *PacketTrace
-	Established               atomic.Uint64
-	Sent                      atomic.Uint64
-	Received                  atomic.Uint64
-	Rejected                  atomic.Uint64
-	Oversize                  atomic.Uint64
-	QueueDropped              atomic.Uint64
-	ReaderDropped             [2]atomic.Uint64
-	ReaderPeak                [2]atomic.Uint64
-	SocketErrors              atomic.Uint64
-	PacingQueued              atomic.Uint64
-	PacingDropped             atomic.Uint64
-	PacingQueueBytes          atomic.Uint64
-	PacingPeakBytes           atomic.Uint64
-	PacingWaitUS              atomic.Uint64
-	ExchangeRequests          atomic.Uint64
-	ExchangeResumes           atomic.Uint64
-	ExchangeReplies           atomic.Uint64
-	ExchangeEmpty             atomic.Uint64
-	ExchangeExpired           atomic.Uint64
-	ExchangeQueueDropped      atomic.Uint64
-	ExchangePending           atomic.Uint64
-	ExchangeWindowFull        atomic.Uint64
-	ExchangeQueueExpired      atomic.Uint64
-	ExchangeQueueFull         atomic.Uint64
-	ExchangeQueuePackets      atomic.Uint64
-	ExchangeQueuePeak         atomic.Uint64
-	ExchangeQueueDelayMaxUS   atomic.Uint64
-	ExchangeRatePPS           atomic.Uint64
-	ExchangeRateIncreases     atomic.Uint64
-	ExchangeBackoffs          atomic.Uint64
-	ExchangeRTTUS             atomic.Uint64
-	ExchangeLateReplies       atomic.Uint64
-	ExchangeSmallQueuePackets atomic.Uint64
-	ExchangeSmallSent         atomic.Uint64
-	ExchangeSmallDelayMaxUS   atomic.Uint64
+	Trace                      *PacketTrace
+	Established                atomic.Uint64
+	Sent                       atomic.Uint64
+	Received                   atomic.Uint64
+	Rejected                   atomic.Uint64
+	Oversize                   atomic.Uint64
+	QueueDropped               atomic.Uint64
+	ReaderDropped              [2]atomic.Uint64
+	ReaderPeak                 [2]atomic.Uint64
+	SocketErrors               atomic.Uint64
+	PacingQueued               atomic.Uint64
+	PacingDropped              atomic.Uint64
+	PacingQueueBytes           atomic.Uint64
+	PacingPeakBytes            atomic.Uint64
+	PacingWaitUS               atomic.Uint64
+	ExchangeRequests           atomic.Uint64
+	ExchangeResumes            atomic.Uint64
+	ExchangeReplies            atomic.Uint64
+	ExchangeEmpty              atomic.Uint64
+	ExchangeExpired            atomic.Uint64
+	ExchangeQueueDropped       atomic.Uint64
+	ExchangePending            atomic.Uint64
+	ExchangeWindowFull         atomic.Uint64
+	ExchangeQueueExpired       atomic.Uint64
+	ExchangeQueueFull          atomic.Uint64
+	ExchangeQueuePackets       atomic.Uint64
+	ExchangeQueuePeak          atomic.Uint64
+	ExchangeQueueDelayMaxUS    atomic.Uint64
+	ExchangeRatePPS            atomic.Uint64
+	ExchangeRateIncreases      atomic.Uint64
+	ExchangeBackoffs           atomic.Uint64
+	ExchangeLossBackoffs       atomic.Uint64
+	ExchangeDelayBackoffs      atomic.Uint64
+	ExchangePriorFlightReplies atomic.Uint64
+	ExchangePriorFlightExpired atomic.Uint64
+	ExchangeRTTUS              atomic.Uint64
+	ExchangeLateReplies        atomic.Uint64
+	ExchangeSmallQueuePackets  atomic.Uint64
+	ExchangeSmallSent          atomic.Uint64
+	ExchangeSmallDelayMaxUS    atomic.Uint64
 }
 
 func (s *Stats) Snapshot() map[string]uint64 {
@@ -71,6 +75,8 @@ func (s *Stats) Snapshot() map[string]uint64 {
 		"exchange_queue_packets": s.ExchangeQueuePackets.Load(), "exchange_queue_peak": s.ExchangeQueuePeak.Load(),
 		"exchange_queue_delay_max_us": s.ExchangeQueueDelayMaxUS.Load(), "exchange_rate_pps": s.ExchangeRatePPS.Load(),
 		"exchange_rate_increases": s.ExchangeRateIncreases.Load(), "exchange_backoffs": s.ExchangeBackoffs.Load(),
+		"exchange_loss_backoffs": s.ExchangeLossBackoffs.Load(), "exchange_delay_backoffs": s.ExchangeDelayBackoffs.Load(),
+		"exchange_prior_flight_replies": s.ExchangePriorFlightReplies.Load(), "exchange_prior_flight_expired": s.ExchangePriorFlightExpired.Load(),
 		"exchange_rtt_us": s.ExchangeRTTUS.Load(), "exchange_late_replies": s.ExchangeLateReplies.Load(),
 		"exchange_small_queue_packets": s.ExchangeSmallQueuePackets.Load(),
 		"exchange_small_sent":          s.ExchangeSmallSent.Load(), "exchange_small_delay_max_us": s.ExchangeSmallDelayMaxUS.Load()}

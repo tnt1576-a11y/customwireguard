@@ -20,6 +20,8 @@ type exchangeControl struct {
 	provenUntil            time.Time
 	lastReply              time.Time
 	recovering             bool
+	lastReduction          time.Time
+	delayReduction         time.Time
 }
 
 // Resume only capacity recently sustained by authenticated deliveries. This
@@ -55,6 +57,15 @@ func (c *exchangeControl) reply(now time.Time, rtt time.Duration, useful, more b
 	if c.minRTT == 0 || rtt < c.minRTT {
 		c.minRTT = rtt
 	}
+	c.stats.ExchangeRTTUS.Store(uint64(c.srtt.Microseconds()))
+	// Feedback for requests sent before the latest reduction describes the
+	// previous sending rate. Keep its RTT and delivery accounting, but do not
+	// use it to reduce again or justify growth at the new rate. Payloads are
+	// delivered by the caller regardless of this controller-only decision.
+	if now.Add(-rtt).Before(c.lastReduction) {
+		c.stats.ExchangePriorFlightReplies.Add(1)
+		return
+	}
 	if c.epochMin == 0 || rtt < c.epochMin {
 		c.epochMin = rtt
 	}
@@ -63,7 +74,6 @@ func (c *exchangeControl) reply(now time.Time, rtt time.Duration, useful, more b
 		c.useful++
 	}
 	c.backlog = c.backlog || more
-	c.stats.ExchangeRTTUS.Store(uint64(c.srtt.Microseconds()))
 }
 
 func (c *exchangeControl) update(now time.Time, uploadPending bool) {
@@ -78,6 +88,7 @@ func (c *exchangeControl) update(now time.Time, uploadPending bool) {
 	delay := c.acks >= 16 && c.epochMin > c.minRTT+25*time.Millisecond
 	if loss || delay {
 		c.rate = max(c.base, c.rate*7/10)
+		c.lastReduction = now
 		// Old capacity must never bypass a backoff after the path changes.
 		c.provenRate = 0
 		c.provenUntil = time.Time{}
@@ -85,6 +96,17 @@ func (c *exchangeControl) update(now time.Time, uploadPending bool) {
 		c.cooldown = now.Add(max(200*time.Millisecond, 2*c.srtt))
 		c.quiet = 0
 		c.stats.ExchangeBackoffs.Add(1)
+		if loss {
+			c.stats.ExchangeLossBackoffs.Add(1)
+		}
+		if delay {
+			// A delay-triggered reduction already reacted to the queued flight.
+			// Its later timeouts must not count the same disturbance again.
+			// Loss-only reductions retain the conservative timeout response:
+			// ignoring their old losses can sustain an overload for too long.
+			c.delayReduction = now
+			c.stats.ExchangeDelayBackoffs.Add(1)
+		}
 	} else if !now.Before(c.cooldown) && c.acks >= 8 && (uploadPending || c.backlog || c.useful*4 >= c.acks*3) {
 		// A growth decision alone is not proof the higher rate was delivered.
 		if c.lost == 0 && float64(c.acks) >= float64(c.rate)*elapsed.Seconds()*.8 && c.rate >= c.provenRate {
@@ -198,17 +220,19 @@ func (f *exchangeFlights) take(seq uint64, size int) (adaptiveFlight, bool) {
 	f.count--
 	return value, true
 }
-func (f *exchangeFlights) expire(now time.Time, limit time.Duration) int {
-	n := 0
+func (f *exchangeFlights) expire(now time.Time, limit time.Duration, cutoff time.Time) (total, current int) {
 	for f.head != 0 && f.head <= f.tail {
 		slot := &f.slots[f.head%uint64(len(f.slots))]
 		if slot.seq == f.head {
 			if now.Sub(slot.at) <= limit {
 				break
 			}
+			if !slot.at.Before(cutoff) {
+				current++
+			}
 			*slot = adaptiveFlight{}
 			f.count--
-			n++
+			total++
 		}
 		if f.head == f.tail {
 			f.head = 0
@@ -216,5 +240,5 @@ func (f *exchangeFlights) expire(now time.Time, limit time.Duration) int {
 		}
 		f.head++
 	}
-	return n
+	return total, current
 }
