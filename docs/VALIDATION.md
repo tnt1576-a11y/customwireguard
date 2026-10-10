@@ -1,7 +1,7 @@
 # Local validation
 
-Updated on 2026-10-09. Local and user-run server/path results are recorded below;
-reliable Full-mode internet access remains unresolved.
+Updated on 2026-10-10. Local and user-run server/path results are recorded below;
+sustained Full-mode internet reliability remains unverified.
 
 ## Passed locally
 
@@ -515,6 +515,25 @@ the measurement. Exact packaged binary validation is recorded with deployment.
 Three offline performance-helper fixtures cover successful integrity checks,
 failed transfers and cleanup after partial startup. Source and packaged client
 must also pass the existing startup/routing checks before deployment.
+
+The first user-run adaptive performance test transferred 200 MB of application
+payload through native Windows WireGuard to a diagnostic endpoint on the server's
+tunnel address. All six transfers completed and passed SHA-256 verification.
+The 10/25/50 Mbit/s download targets achieved 9.82/24.55/22.74 Mbit/s, respectively.
+Upload at a 25 Mbit/s target averaged 22.42 Mbit/s. Simultaneous upload/download
+at 25 Mbit/s each averaged 22.53/24.55 Mbit/s. All 356 tunnel pings succeeded;
+median RTT was 92 ms overall, with 115 ms overall p95 and 157 ms maximum.
+Idle median was 92 ms; simultaneous-load median/p95 were 94/137 ms.
+
+There was one association with no client socket errors or server restarts.
+Both peers' 1/128 sampled outer packet hashes matched throughout the transfer
+phases; this does not establish zero loss. The client counted 18 expired outer
+requests before shutdown. It also counted 3,219 native-data queue expirations
+during upload/duplex traffic; the server counted none during the active test.
+Upload burst handling therefore remains an implementation concern. The cause
+of the slower 50 Mbit/s download is unresolved and does not establish a fixed
+ISP rate cap. These short server-directed transfers do not measure general
+Internet download performance, long-term stability, or future DPI resistance.
 
 ## Not verified here
 
