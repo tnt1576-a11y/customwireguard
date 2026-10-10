@@ -61,6 +61,29 @@ func TestRejectUnknownAndTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestExchangeBurstConfig(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(filepath.Join(dir, "client.json"), "client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Transport = "exchange"
+	c.ExchangeQueueMS = 60
+	c.ExchangeBurstMS = 200
+	if err := c.Validate("client"); err != nil {
+		t.Fatal(err)
+	}
+	for _, values := range [][2]int{{0, 200}, {60, 59}, {60, 251}, {200, 60}, {60, -1}} {
+		c.ExchangeQueueMS, c.ExchangeBurstMS = values[0], values[1]
+		if c.Validate("client") == nil {
+			t.Fatal("invalid burst accepted", values)
+		}
+	}
+}
+
 func TestRawPacingValidation(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bundle")
 	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {

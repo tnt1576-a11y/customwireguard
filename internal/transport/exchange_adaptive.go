@@ -98,9 +98,9 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			control.lost += lost
 			stats.ExchangeExpired.Add(uint64(lost))
 			upload.expire(now)
-			control.update(now, len(upload.items) > 0)
+			control.update(now, upload.length() > 0)
 			rate := control.rate
-			if now.After(busyUntil) && len(upload.items) == 0 {
+			if now.After(busyUntil) && upload.length() == 0 {
 				rate = 4
 			}
 			stats.ExchangeRatePPS.Store(uint64(rate))
@@ -153,9 +153,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				}
 				stats.Established.Add(1)
 				upload.expire(now)
-				for i := range upload.items {
-					upload.items[i].at = now
-				}
+				upload.rebase(now)
 				upload.maxAge = time.Duration(cfg.ExchangeQueueMS) * time.Millisecond
 				busyUntil = now.Add(2 * time.Second)
 				arm(now, 0)

@@ -535,7 +535,25 @@ of the slower 50 Mbit/s download is unresolved and does not establish a fixed
 ISP rate cap. These short server-directed transfers do not measure general
 Internet download performance, long-term stability, or future DPI resistance.
 
-## Not verified here
+## Burst queue investigation (0.5.1)
+
+The new queue was compared with the original 60 ms FIFO using identical
+localhost carrier traffic and 45 ms of simulated delay in each direction.
+Six 1000-packet bursts were offered in each direction, with small packets
+interspersed. The old queue dropped approximately 40% of bulk packets and
+4.18% of small packets. With the 200 ms bulk deadline and bounded small-packet
+priority, all 6000 bulk packets in each direction and all small packets arrived.
+Small-packet one-way p95 was below 48 ms including the 45 ms simulated path;
+bulk-packet p95 rose to about 169 ms. That is an explicit delay/loss tradeoff
+for bulk traffic, not a claim that every packet retains a 60 ms queue limit.
+
+Focused tests cover bounds, starvation prevention, per-class expiry, startup
+rebasing, native WireGuard handshakes, smooth upload integrity and cancellation.
+The user-run 50 Mbit/s slowdown is still unexplained. Per-connection TCP
+telemetry and single-versus-parallel downloads are prepared to distinguish
+congestion/retransmission, receive-window, application pacing and carrier limits.
+
+## Still not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,
   throughput, and native Windows recovery across reboot/network changes. Short

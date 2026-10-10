@@ -27,6 +27,11 @@ function Start-Sleep {param($Milliseconds)}
 function Start-Process {
     param($FilePath,$ArgumentList,$WindowStyle,[switch]$PassThru,$RedirectStandardOutput,$RedirectStandardError)
     if($WindowStyle -ne 'Hidden'){throw 'Diagnostic window not hidden'}
+    $smooth=$ArgumentList.StartsWith('smooth-upload ')
+    if($smooth){
+        if($ArgumentList -notmatch '-bytes 256 -bps 3125000 -id [A-Za-z0-9-]+'){throw 'Invalid smooth upload arguments'}
+        '{"speed_upload":3125000,"complete_and_verified":true,"received_bytes":256}'|Set-Content -LiteralPath $RedirectStandardOutput
+    }else{
     if($ArgumentList -notmatch '--output "([^"]+)"'){throw 'Missing output'}
     $bodyPath=$Matches[1]
     $payload=[byte[]](0..255);$sha=[Security.Cryptography.SHA256]::Create()
@@ -37,6 +42,7 @@ function Start-Process {
         @{received_bytes=256;sha256=$digest}|ConvertTo-Json|Set-Content -LiteralPath $bodyPath
     }else{[IO.File]::WriteAllBytes($bodyPath,$payload)}
     '{"speed_download":1250000,"speed_upload":1250000}'|Set-Content -LiteralPath $RedirectStandardOutput
+    }
     ''|Set-Content -LiteralPath $RedirectStandardError
     $p=[pscustomobject]@{Handle=1;HasExited=$true;ExitCode=$(if($global:AdaptiveCase -eq 'curl-failure'){28}else{0})}
     $p|Add-Member ScriptMethod WaitForExit {}
@@ -47,7 +53,7 @@ function Start-Process {
 foreach($case in @('success','curl-failure','partial-start')){
     $global:AdaptiveCase=$case;$global:AdaptiveStarts=0;$global:AdaptiveStops=0;$global:AdaptivePingDisposed=$false
     $bundle=Join-Path $fixture $case;New-Item -ItemType Directory -Path $bundle|Out-Null
-    '{"transport":"exchange","exchange_max_pps":6000}'|Set-Content -LiteralPath (Join-Path $bundle 'client.json')
+    '{"transport":"exchange","exchange_max_pps":6000,"exchange_burst_ms":200}'|Set-Content -LiteralPath (Join-Path $bundle 'client.json')
     $failed=$false
     try{& (Join-Path $fixture 'Measure-AdaptivePerformance.ps1') -Bundle $bundle 6>$null}catch{if($case -ne 'partial-start'){throw};$failed=$true}
     if($failed -ne ($case -eq 'partial-start') -or $global:AdaptiveStarts -ne 1 -or $global:AdaptiveStops -ne 1){throw ('Cleanup failed: '+$case)}
@@ -56,7 +62,7 @@ foreach($case in @('success','curl-failure','partial-start')){
         $directory=Get-ChildItem -LiteralPath $bundle -Directory|Select-Object -First 1
         $report=Get-Content -LiteralPath (Join-Path $directory.FullName 'report.txt') -Raw
         $expected=if($case -eq 'success'){':true'}else{':false'}
-        if([regex]::Matches($report,'"complete_and_verified"'+$expected).Count -ne 6){throw ('Transfer result wrong: '+$case)}
+        if([regex]::Matches($report,'"complete_and_verified"'+$expected).Count -ne 8){throw ('Transfer result wrong: '+$case)}
         if(@(Get-ChildItem -LiteralPath $directory.FullName -File|Where-Object Extension -in '.body','.bin').Count){throw 'Synthetic files left behind'}
     }
     Write-Host ('PASS: '+$case)

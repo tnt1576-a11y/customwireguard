@@ -10,6 +10,10 @@ window, short native-data queue deadlines and sampled diagnostics. It preserves
 the same authenticated version-2 datagrams and one same-sized reply per request.
 The initial adaptive ceiling is 6000 requests/s, rather than the earlier
 200/s fixed ceiling. This is a configurable ceiling, not a promised Internet speed.
+Version 0.5.1 adds an optional bounded bulk-burst queue with small-packet
+priority, plus a smooth upload diagnostic and per-transfer TCP measurements.
+The next user-run comparison separates burst handling from single-connection
+download limits; it does not change the wire format or the request-rate ceiling.
 The original raw carrier and its pacing option remain available for comparison.
 The earlier [HTTP/3 experiment](docs/HTTP3.md) remains
 available for reference, but failed preflight on the target network on both

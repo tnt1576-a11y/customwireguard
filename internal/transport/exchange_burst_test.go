@@ -1,0 +1,77 @@
+package transport
+
+import (
+	"customwireguard/internal/config"
+	"testing"
+	"time"
+)
+
+func TestExchangeBurstDrainsWithoutDelayingSmallPackets(t *testing.T) {
+	now := time.Unix(1000, 0)
+	s := new(Stats)
+	q := newExchangeQueue(config.Config{ExchangeQueueMS: 60, ExchangeBurstMS: 200}, s)
+	// A 1000-packet application burst needs ~167 ms at the configured ceiling.
+	for i := 0; i < 1000; i++ {
+		q.push(make([]byte, 1120), now)
+	}
+	bulk, small := 0, 0
+	for ms := 0; ms < 180; ms++ {
+		at := now.Add(time.Duration(ms) * time.Millisecond)
+		if ms%10 == 0 {
+			q.push(make([]byte, 80), at)
+		}
+		for n := 0; n < 6; n++ {
+			p := q.pop(at)
+			if len(p) == 80 {
+				small++
+			} else if len(p) > 0 {
+				bulk++
+			}
+		}
+	}
+	if bulk != 1000 || small != 18 || s.ExchangeQueueDropped.Load() != 0 {
+		t.Fatal("burst lost payload", bulk, small, s.Snapshot())
+	}
+	if s.ExchangeSmallDelayMaxUS.Load() > 1000 || s.ExchangeQueueDelayMaxUS.Load() < 60000 {
+		t.Fatal("small packets did not bypass bulk", s.Snapshot())
+	}
+}
+
+func TestExchangeBurstBoundFairnessAndExpiry(t *testing.T) {
+	now := time.Now()
+	s := new(Stats)
+	q := newExchangeQueue(config.Config{ExchangeQueueMS: 60, ExchangeBurstMS: 200}, s)
+	for i := 0; i < 2200; i++ {
+		q.push(make([]byte, 1120), now)
+	}
+	for i := 0; i < 200; i++ {
+		q.push(make([]byte, 80), now)
+	}
+	if q.length() != 2048 || len(q.small) != 128 || s.ExchangeQueueFull.Load() != 352 {
+		t.Fatal("queue reservation unbounded", q.length(), len(q.small), s.Snapshot())
+	}
+	for n := 0; n < 10; n++ {
+		p := q.pop(now)
+		if (n%5 == 4) != (len(p) == 1120) {
+			t.Fatal("bulk starved", n, len(p))
+		}
+	}
+	q.expire(now.Add(61 * time.Millisecond))
+	if len(q.small) != 0 || len(q.items) != 1918 {
+		t.Fatal("wrong per-class expiry")
+	}
+	q.expire(now.Add(201 * time.Millisecond))
+	if q.length() != 0 || s.ExchangeQueuePackets.Load() != 0 || s.ExchangeSmallQueuePackets.Load() != 0 {
+		t.Fatal("sustained backlog exceeded hard deadline")
+	}
+	q.push(make([]byte, 80), now)
+	q.push(make([]byte, 1120), now)
+	q.rebase(now.Add(time.Second))
+	if q.pop(now.Add(time.Second)) == nil {
+		t.Fatal("startup rebasing lost small packet")
+	}
+	q.clear()
+	if q.length() != 0 || q.smallRun != 0 {
+		t.Fatal("clear retained state")
+	}
+}

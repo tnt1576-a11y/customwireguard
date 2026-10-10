@@ -110,7 +110,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 					payload := downstream.pop(now)
 					reply := make([]byte, 9+len(payload))
 					binary.BigEndian.PutUint64(reply[:8], f.Sequence)
-					if len(downstream.items) > 0 {
+					if downstream.length() > 0 {
 						reply[8] = 1
 					}
 					copy(reply[9:], payload)

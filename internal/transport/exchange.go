@@ -19,9 +19,12 @@ type exchangeItem struct {
 }
 type exchangeQueue struct {
 	items    []exchangeItem
+	small    []exchangeItem
 	stats    *Stats
 	maxAge   time.Duration
+	burstAge time.Duration
 	capacity int
+	smallRun int
 }
 
 func newExchangeQueue(cfg config.Config, stats *Stats) exchangeQueue {
@@ -30,7 +33,21 @@ func newExchangeQueue(cfg config.Config, stats *Stats) exchangeQueue {
 		q.maxAge = time.Duration(cfg.ExchangeQueueMS) * time.Millisecond
 		q.capacity = 2048
 	}
+	q.burstAge = time.Duration(cfg.ExchangeBurstMS) * time.Millisecond
 	return q
+}
+
+func (q *exchangeQueue) length() int { return len(q.items) + len(q.small) }
+func (q *exchangeQueue) rebase(now time.Time) {
+	for _, items := range [][]exchangeItem{q.items, q.small} {
+		for i := range items {
+			items[i].at = now
+		}
+	}
+}
+func (q *exchangeQueue) gauge() {
+	q.stats.ExchangeQueuePackets.Store(uint64(q.length()))
+	q.stats.ExchangeSmallQueuePackets.Store(uint64(len(q.small)))
 }
 
 func (q *exchangeQueue) expire(now time.Time) {
@@ -38,13 +55,19 @@ func (q *exchangeQueue) expire(now time.Time) {
 	if limit == 0 {
 		limit = 500 * time.Millisecond
 	}
-	for len(q.items) > 0 && now.Sub(q.items[0].at) > limit {
-		q.items[0] = exchangeItem{}
-		q.items = q.items[1:]
-		q.stats.ExchangeQueueDropped.Add(1)
-		q.stats.ExchangeQueueExpired.Add(1)
+	for i, queue := range []*[]exchangeItem{&q.items, &q.small} {
+		deadline := limit
+		if i == 0 && q.burstAge > 0 {
+			deadline = max(limit, q.burstAge)
+		}
+		for len(*queue) > 0 && now.Sub((*queue)[0].at) > deadline {
+			(*queue)[0] = exchangeItem{}
+			*queue = (*queue)[1:]
+			q.stats.ExchangeQueueDropped.Add(1)
+			q.stats.ExchangeQueueExpired.Add(1)
+		}
 	}
-	q.stats.ExchangeQueuePackets.Store(uint64(len(q.items)))
+	q.gauge()
 }
 func (q *exchangeQueue) push(data []byte, now time.Time) {
 	q.expire(now)
@@ -52,31 +75,56 @@ func (q *exchangeQueue) push(data []byte, now time.Time) {
 	if capacity == 0 {
 		capacity = 128
 	}
-	if len(q.items) >= capacity {
+	queue := &q.items
+	full := q.length() >= capacity
+	if q.burstAge > 0 {
+		// Size is the only hint available for encrypted WireGuard packets.
+		// Reserve bounded room for small packets, without claiming flow identity.
+		if len(data) <= 256 {
+			queue = &q.small
+			full = full || len(q.small) >= 128
+		} else {
+			full = full || len(q.items) >= capacity-128
+		}
+	}
+	if full {
 		q.stats.ExchangeQueueDropped.Add(1)
 		q.stats.ExchangeQueueFull.Add(1)
 		return
 	}
-	q.items = append(q.items, exchangeItem{data, now})
-	q.stats.ExchangeQueuePackets.Store(uint64(len(q.items)))
-	storeMax(&q.stats.ExchangeQueuePeak, uint64(len(q.items)))
+	*queue = append(*queue, exchangeItem{data, now})
+	q.gauge()
+	storeMax(&q.stats.ExchangeQueuePeak, uint64(q.length()))
 }
 func (q *exchangeQueue) pop(now time.Time) []byte {
 	q.expire(now)
-	if len(q.items) == 0 {
+	if q.length() == 0 {
 		return nil
 	}
-	data := q.items[0].data
-	storeMax(&q.stats.ExchangeQueueDelayMaxUS, uint64(max(0, now.Sub(q.items[0].at).Microseconds())))
-	q.items[0] = exchangeItem{}
-	q.items = q.items[1:]
-	q.stats.ExchangeQueuePackets.Store(uint64(len(q.items)))
+	queue := &q.items
+	// At most four small packets may pass a waiting bulk packet. Keep order
+	// within each class and prevent either class starving the other.
+	if len(q.small) > 0 && (len(q.items) == 0 || q.smallRun < 4) {
+		queue = &q.small
+		q.smallRun++
+		q.stats.ExchangeSmallSent.Add(1)
+		storeMax(&q.stats.ExchangeSmallDelayMaxUS, uint64(max(0, now.Sub(q.small[0].at).Microseconds())))
+	} else {
+		q.smallRun = 0
+	}
+	data := (*queue)[0].data
+	storeMax(&q.stats.ExchangeQueueDelayMaxUS, uint64(max(0, now.Sub((*queue)[0].at).Microseconds())))
+	(*queue)[0] = exchangeItem{}
+	*queue = (*queue)[1:]
+	q.gauge()
 	return data
 }
 func (q *exchangeQueue) clear() {
-	q.stats.ExchangeQueueDropped.Add(uint64(len(q.items)))
+	q.stats.ExchangeQueueDropped.Add(uint64(q.length()))
 	q.items = nil
-	q.stats.ExchangeQueuePackets.Store(0)
+	q.small = nil
+	q.smallRun = 0
+	q.gauge()
 }
 
 type exchangeFlight struct {
@@ -187,7 +235,7 @@ func runExchangeClient(ctx context.Context, local, remote *net.UDPConn, cfg conf
 			}
 			stats.ExchangePending.Store(uint64(len(flights)))
 			interval := 250 * time.Millisecond
-			if now.Before(fastUntil) || len(upload.items) > 0 {
+			if now.Before(fastUntil) || upload.length() > 0 {
 				interval = fastInterval
 			}
 			arm(time.Now(), interval*time.Duration(wire.RandomBetween(80, 120))/100)

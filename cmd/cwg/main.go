@@ -18,7 +18,7 @@ import (
 	"customwireguard/internal/transport"
 )
 
-var version = "0.5.0-dev"
+var version = "0.5.1-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -33,6 +33,9 @@ func run(args []string) error {
 		return nil
 	}
 	command := args[0]
+	if command == "smooth-upload" {
+		return smoothUpload(args[1:])
+	}
 	if command == "version" {
 		fmt.Println("cwg", version)
 		return nil
@@ -215,6 +218,9 @@ func run(args []string) error {
 	if cfg.Transport == "exchange" && (cfg.ExchangeMaxPPS > 0 || cfg.ExchangeQueueMS > 0) {
 		reportInterval = 5 * time.Second
 	}
+	if cfg.ExchangeBurstMS > 0 {
+		reportInterval = time.Second
+	}
 	go report(ctx, stats, reportInterval)
 	fmt.Fprintln(os.Stderr, "cwg", version, command, "started; experimental transport; one WireGuard peer per instance")
 	if cfg.Transport == "h3" {
@@ -265,7 +271,9 @@ func report(ctx context.Context, stats *transport.Stats, interval time.Duration)
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			json.NewEncoder(os.Stderr).Encode(stats.Snapshot())
+			snapshot := stats.Snapshot()
+			snapshot["utc_unix_ms"] = uint64(time.Now().UnixMilli())
+			json.NewEncoder(os.Stderr).Encode(snapshot)
 		}
 	}
 }
@@ -278,6 +286,7 @@ func usage() {
   cwg check -config FILE.json
   cwg server -config server.json
   cwg client -config client.json
+  cwg smooth-upload -endpoint TUNNEL_IP:PORT -bytes 31250000 -bps 3125000
   cwg client -config client.json -trace NEW_PRIVATE_FILE.jsonl
   cwg client -config client.json -interface-index WINDOWS_PHYSICAL_IFINDEX
   cwg probe -config client.json -count 5

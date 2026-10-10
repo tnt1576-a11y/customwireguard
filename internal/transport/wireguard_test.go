@@ -28,6 +28,7 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	t.Run("paced-raw", func(t *testing.T) { testRealWireGuard(t, false, 1000, false) })
 	t.Run("exchange", func(t *testing.T) { testRealWireGuard(t, false, 0, true) })
 	t.Run("adaptive-exchange", func(t *testing.T) { testRealWireGuard(t, false, -1, true) })
+	t.Run("burst-exchange", func(t *testing.T) { testRealWireGuard(t, false, -2, true) })
 }
 
 func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
@@ -78,10 +79,13 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 	}
 	if exchange {
 		clientCfg.Transport, serverCfg.Transport = "exchange", "exchange"
-		if pace == -1 {
+		if pace < 0 {
 			clientCfg.ExchangeMaxPPS = 6000
 			clientCfg.ExchangeQueueMS = 60
 			serverCfg.ExchangeQueueMS = 60
+			if pace == -2 {
+				clientCfg.ExchangeBurstMS, serverCfg.ExchangeBurstMS = 200, 200
+			}
 		}
 	}
 	if h3 {

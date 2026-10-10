@@ -1,4 +1,44 @@
-# Experimental request/reply UDP (0.4.0 and adaptive 0.5.0)
+# Experimental request/reply UDP (0.4.0 through 0.5.1)
+
+## Burst handling and investigation in 0.5.1
+
+On both peers, optionally add exchange_burst_ms: 200 alongside
+exchange_queue_ms: 60. The burst deadline must be at least the normal deadline
+and at most 250 ms. Omitting it preserves the previous FIFO behavior.
+
+When enabled, packets over 256 bytes use the bulk deadline. Smaller encrypted
+WireGuard packets retain the shorter deadline and can pass bulk packets, with
+at most four small packets before a waiting bulk packet. This is a length-based
+hint, not identification of TCP flows or decrypted packet contents. It can
+reorder the two size classes; order within each class is preserved. The total
+limit remains 2048 packets, with 128 places reserved for small packets.
+At 6000 requests/s, a 1000-packet burst needs about 167 ms to drain, exceeding
+the previous 60 ms deadline. Bulk packets may now wait longer instead of
+being dropped, while small packets avoid that bulk backlog. Sustained overload
+still expires data at bounded deadlines; this does not create more bandwidth.
+
+Burst-enabled deployments report timestamped counters every second, including
+small-packet queue depth and maximum waiting time. The carrier format, 6000/s
+ceiling, native MTU and cryptography are unchanged.
+
+The updated performance helper compares 25 and 50 Mbit/s single downloads,
+two simultaneous 25 Mbit/s downloads, the original curl upload, a smoothly
+paced upload, and simultaneous upload/download. It transfers 281.25 MB of
+application payload plus polling/padding overhead and stops CWG in cleanup.
+The new cwg smooth-upload command generates its own payload, verifies the
+server's hash, and permits only the tunnel address or localhost. It uses
+small paced reads with bounded catch-up, retaining OS TCP buffer autotuning.
+The original upload remains as a direct comparison because curl rate limiting
+averages over several seconds ([curl manual](https://curl.se/docs/manpage.html#--limit-rate)).
+
+The tunnel-only HTTP endpoint records per-transfer progress, blocked I/O time,
+and Linux TCP information: retransmissions, congestion window, peer receive
+window, acknowledged bytes and time limited by receive/send buffers. Host UDP
+buffer errors are cumulative counters and must be compared as deltas. Fields
+follow the [Linux TCP UAPI](https://github.com/torvalds/linux/blob/v6.12/include/uapi/linux/tcp.h);
+unsupported platforms report null rather than invented zeros. The endpoint
+has at most four handlers, no payload storage, and a 45-second transfer deadline.
+Telemetry starts only for user-initiated transfers; it creates no test traffic.
 
 ## Adaptive scheduling in 0.5.0
 
@@ -49,7 +89,7 @@ Unsampled aggregate counters still cover the whole session.
 
 The user-run Measure-AdaptivePerformance.ps1 requires the temporary
 tunnel-performance-server.py endpoint bound only to the WireGuard address.
-It transfers200MB of synthetic application payload with additional polling/
+The original 0.5.0 test transferred200MB of synthetic application payload with additional polling/
 padding overhead, measures ping throughout each load phase, validates complete
 transfers by SHA256, saves results, and stops CWG in finally. It starts no test
 automatically; the user must invoke it. The diagnostic HTTP is application data
