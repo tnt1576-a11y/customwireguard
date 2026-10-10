@@ -622,7 +622,37 @@ The 0.5.3 correction enlarges only the burst-enabled server's native handoff
 and permits a 350 ms client bulk deadline. Focused regression tests exercise
 input bounds, per-reader drop attribution, packet order/read timestamps,
 the measured 1874-packet upload burst, small-packet latency and hard expiry.
-Its effect on the target network requires another user-run comparison.
+The subsequent user-run 0.5.3 comparison verified all eight transfers (281.25
+MB). Downloads at 25/50 Mbit/s reached 24.46/46.51 Mbit/s. Individual parallel
+download averages were 24.51 and 22.34 Mbit/s. Bursty/smooth uploads reached
+23.42/23.67 Mbit/s; simultaneous upload/download reached 23.75/24.54 Mbit/s.
+All 353 pings succeeded: median 93 ms, p95 107 ms, maximum 120 ms. The preceding
+run's p95 was 100 ms, so this does not claim an improvement in every latency
+measure. Idle-before median/p95 were 93/94 ms; duplex median/p95 were 93/108 ms.
+
+Both peers' reader handoff drops were zero, including the server native reader
+that previously dropped 1791 packets. Its observed peak was 965 queued packets,
+above the former 256-packet limit and below the new 2048-packet bound. Host UDP
+receive-buffer errors and server socket drops also remained zero. Client queue
+expirations fell from 1104 to zero. These measurements verify the targeted input
+and age-limit corrections for this run, rather than establish lossless transport.
+
+The remaining loss reached the bounded exchange queues: 710 client capacity
+drops during the deliberately bursty upload and 312 server expirations during
+the 50 Mbit/s download. Client maximum bulk wait was 330.754 ms; server maximum
+was 199.999 ms. Small-packet maxima were 19.759/18.189 ms respectively. Smooth
+upload and duplex had no exchange queue drops. Observed server TCP download
+retransmissions were 0 (25 Mbit/s), 539 (50 Mbit/s), 0/2 (parallel), and 29
+(duplex). These counts are sampled through application write completion and
+do not directly measure missing outer datagrams. One association, no socket
+errors, 15 expired outer requests and one rate backoff were recorded. All outer
+hash samples matched within transfer phases; sampling remains 1/128.
+
+The current build remains the measured baseline. A user-run six-minute
+idle/video/idle comparison using the existing Measure-VideoLoad helper and
+120 samples per phase checks application behavior beyond server-directed
+synthetic transfers. Remaining burst-capacity/expiry loss is unresolved;
+larger buffers alone do not add sending capacity or prove future stability.
 
 ## Still not verified here
 
