@@ -25,14 +25,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 		return err
 	}
 	wgAddr := netip.MustParseAddrPort(cfg.WireGuard)
-	var capacities []int
-	if cfg.ExchangeBurstMS > 0 {
-		// Match the server's native input handoff. At higher rates a native
-		// batch can exceed 256 packets before the event loop drains it; losing
-		// here would discard small packets before priority can be applied.
-		capacities = []int{2048, 256}
-	}
-	channels, cleanup := readersSized(ctx, stats, capacities, local, remote)
+	channels, cleanup := readersSized(ctx, stats, adaptiveIngressCapacities(cfg), local, remote)
 	defer cleanup()
 	fecReceive := &fecReceiver{stats: stats, emit: func(data []byte) {
 		if send(local, wgAddr, data, stats) {
@@ -247,4 +240,15 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			}
 		}
 	}
+}
+
+func adaptiveIngressCapacities(cfg config.Config) []int {
+	if cfg.ExchangeBurstMS == 0 {
+		return nil
+	}
+	// Native batches must reach the priority queue before its deadline policy
+	// runs. The connected outer socket also needs room for a coalesced reply
+	// burst after a short scheduling stall. Neither handoff waits for a batch
+	// to fill. Server public unauthenticated input remains separately bounded.
+	return []int{2048, 1024}
 }

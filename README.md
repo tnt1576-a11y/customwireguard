@@ -5,15 +5,19 @@ carrier**. It carries complete native WireGuard datagrams and remains UDP-only;
 there is no TCP fallback. Each authenticated request permits one same-sized
 response; the server queues return traffic until the client requests it.
 See [request/reply mode and its bandwidth cost](docs/EXCHANGE.md).
-Version 0.5.7 adds optional interleaved recovery (`exchange_fec`) that can recover
-one lost native datagram in each small group without waiting for a retransmission.
-Parity shares scheduled slots even during bulk traffic, consuming some capacity.
-Capability negotiation prevents silently enabling it against an incompatible
-server. Controlled loss recovery passed, but live results were mixed: two early
-runs completed all transfers, while later FEC-on/off/on runs completed 6/8, 6/8
-and 7/8. FEC remains experimental and defaults off. Normal use retains the
-0.5.6 profile: 8000 requests/s, 2 ms reordering and spare-slot backup copies.
-See the [recovery results and limits](docs/VALIDATION.md#057-interleaved-recovery-2026-10-10).
+Version 0.5.8 corrects loss accounting after a rate reduction, protects native
+handshakes from short data-queue deadlines, and improves bounded burst handling.
+Normal use keeps 8000 requests/s, 2 ms reordering and spare-slot backup copies.
+The final separate-PC run completed all eight transfers and 1715/1715 active
+rapid pings, with one client data expiration and 0.14725% outer reply timeouts.
+This is a short-run result; residual path loss and long-term reliability remain
+open. See [all successful and failed trials](docs/VALIDATION.md#058-bounded-queue-corrections-2026-10-10).
+
+Optional interleaved recovery (`exchange_fec`, added in 0.5.7) can recover one
+missing original per group without waiting for a retransmission. Version 0.5.8
+defers its parity when originals approach expiry. It remains experimental and
+defaults off: live comparisons have not established a consistent advantage over
+spare-slot repair. Capability negotiation rejects incompatible endpoints.
 
 Version 0.5.5 prevents old timeouts after a delay-triggered rate reduction from
 counting the same disturbance again. New counters distinguish loss and delay

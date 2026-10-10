@@ -41,6 +41,11 @@ type Stats struct {
 	ExchangeWindowFull         atomic.Uint64
 	ExchangeQueueExpired       atomic.Uint64
 	ExchangeQueueFull          atomic.Uint64
+	ExchangeSmallQueueFull     atomic.Uint64
+	ExchangeBulkQueueFull      atomic.Uint64
+	ExchangeControlQueueFull   atomic.Uint64
+	ExchangeControlExpired     atomic.Uint64
+	ExchangeControlSent        atomic.Uint64
 	ExchangeQueuePackets       atomic.Uint64
 	ExchangeQueuePeak          atomic.Uint64
 	ExchangeQueueDelayMaxUS    atomic.Uint64
@@ -65,6 +70,7 @@ type Stats struct {
 	ExchangeFECParity          atomic.Uint64
 	ExchangeFECRecovered       atomic.Uint64
 	ExchangeFECExpired         atomic.Uint64
+	ExchangeFECDeferred        atomic.Uint64
 	ExchangeFECSkipped         atomic.Uint64
 	ExchangeFECInvalid         atomic.Uint64
 	ExchangeFECLate            atomic.Uint64
@@ -87,6 +93,8 @@ func (s *Stats) Snapshot() map[string]uint64 {
 		"exchange_resumes": s.ExchangeResumes.Load(),
 		"exchange_pending": s.ExchangePending.Load(), "exchange_window_full": s.ExchangeWindowFull.Load(),
 		"exchange_queue_expired": s.ExchangeQueueExpired.Load(), "exchange_queue_full": s.ExchangeQueueFull.Load(),
+		"exchange_small_queue_full": s.ExchangeSmallQueueFull.Load(), "exchange_bulk_queue_full": s.ExchangeBulkQueueFull.Load(),
+		"exchange_control_queue_full": s.ExchangeControlQueueFull.Load(), "exchange_control_expired": s.ExchangeControlExpired.Load(), "exchange_control_sent": s.ExchangeControlSent.Load(),
 		"exchange_queue_packets": s.ExchangeQueuePackets.Load(), "exchange_queue_peak": s.ExchangeQueuePeak.Load(),
 		"exchange_queue_delay_max_us": s.ExchangeQueueDelayMaxUS.Load(), "exchange_rate_pps": s.ExchangeRatePPS.Load(),
 		"exchange_rate_increases": s.ExchangeRateIncreases.Load(), "exchange_backoffs": s.ExchangeBackoffs.Load(),
@@ -97,7 +105,8 @@ func (s *Stats) Snapshot() map[string]uint64 {
 		"exchange_repair_sent":       s.ExchangeRepairSent.Load(), "exchange_repair_expired": s.ExchangeRepairExpired.Load(),
 		"exchange_fec_data": s.ExchangeFECData.Load(), "exchange_fec_parity": s.ExchangeFECParity.Load(),
 		"exchange_fec_recovered": s.ExchangeFECRecovered.Load(), "exchange_fec_expired": s.ExchangeFECExpired.Load(),
-		"exchange_fec_skipped": s.ExchangeFECSkipped.Load(), "exchange_fec_invalid": s.ExchangeFECInvalid.Load(), "exchange_fec_late": s.ExchangeFECLate.Load(),
+		"exchange_fec_deferred": s.ExchangeFECDeferred.Load(),
+		"exchange_fec_skipped":  s.ExchangeFECSkipped.Load(), "exchange_fec_invalid": s.ExchangeFECInvalid.Load(), "exchange_fec_late": s.ExchangeFECLate.Load(),
 		"exchange_reordered_requests": s.ExchangeReorderedRequests.Load(),
 		"exchange_reorder_held":       s.ExchangeReorderHeld.Load(), "exchange_reorder_late": s.ExchangeReorderLate.Load(),
 		"exchange_reorder_forced": s.ExchangeReorderForced.Load(), "exchange_reorder_wait_max_us": s.ExchangeReorderWaitMaxUS.Load(),
@@ -165,9 +174,9 @@ func readers(ctx context.Context, stats *Stats, conns ...*net.UDPConn) ([]chan p
 	return readersSized(ctx, stats, nil, conns...)
 }
 
-// Only the native backend of a burst-enabled server needs a larger handoff.
-// Keep the public unauthenticated input at its existing bound. Packet ages
-// begin at the socket read, so this queue cannot reset downstream deadlines.
+// Callers can size individual bounded handoffs for coalesced receive bursts.
+// Packet ages begin at the socket read, so increasing a handoff cannot reset
+// downstream deadlines. Omitted sizes retain the 256-packet default.
 func readersSized(ctx context.Context, stats *Stats, capacities []int, conns ...*net.UDPConn) ([]chan packet, func()) {
 	var wg sync.WaitGroup
 	channels := make([]chan packet, len(conns))

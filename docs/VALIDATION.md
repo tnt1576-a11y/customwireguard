@@ -3,6 +3,118 @@
 Updated on 2026-10-10. Local and user-run server/path results are recorded below;
 sustained Full-mode internet reliability remains unverified.
 
+## 0.5.8 bounded queue corrections (2026-10-10)
+
+Inspection of the final 0.5.7 trace exposed two separate local failures: 951
+native originals expired during duplex, then the client's 256-entry outer
+receive handoff dropped 131 replies eight seconds later. The earlier summary
+covered zero server reader drops and missed the client drops; it is corrected
+below. These are measured local drops, not evidence of DPI intent.
+
+The new FEC scheduler defers parity when either original queue has spent half
+its existing deadline. A deterministic constrained-duplex regression delivers
+1000 bulk originals and 20 small arrivals at 100 Hz with no original expiry;
+the previous scheduler delivered 945 bulk originals and expired 55 under the
+same schedule. Small waiting time is at most 125 microseconds in that fixture.
+Deferred backup expiry is expected and separately counted.
+
+A paused-consumer UDP test reproduces a 387-reply burst. The larger fixed client
+outer handoff accepts all 387. An overload case confirms its 1024-packet bound,
+drop attribution, ordered delivery and unchanged socket-read timestamps.
+
+The first candidate (before small-slot borrowing) passed vet, the complete Go
+suite, and exact Windows/Linux FEC smoke. The second PC then completed 8/8
+verified transfers, 458/458 regular pings and 2002/2003 active rapid pings.
+Rapid ping median/p95/maximum were 107/119/142 ms. The initial idle phase was
+already around 107 ms, so absolute latency cannot be compared directly with
+earlier 96 ms-path runs. Every phase's regular-ping median was 105..108 ms.
+Client and server reader/socket drops, host UDP errors, and native queue
+expirations were zero. There were still 1323 outer timeouts (0.18369%).
+
+This candidate rejected 62 small native packets at the old 128-slot class cap
+despite unused total capacity. One sampled 64-byte native upload was missing at
+the time of the rapid-ping failure during initial idle. The subsequent correction
+allows bounded borrowing up to 256 small packets without increasing total
+capacity or the 60 ms deadline. Its regression delivers the observed 182-packet
+burst plus a fresh arrival alongside 1024 bulk packets, with no loss and under
+40 ms small-packet waiting time. Separate overload checks preserve the hard
+small deadline and fixed borrowing bound. Live follow-up results follow below.
+
+The second candidate passed all local checks, but completed only 7/8 live
+transfers. The 50 Mbps-target download received 24,914,104 of 62,500,000 bytes
+before its original 30-second deadline. Regular pings were 503/503, active rapid
+pings 2190/2192 (median/p95/max 99/119/194 ms). Client and server reader/socket
+drops and queue-full counts were zero. The client's outer-reader peak reached
+451, exceeding the former 256 limit without dropping. There were 172 client
+native expirations, including 169 during a burst after rate reductions, and
+1849 outer timeouts (0.24065%) with 51 loss backoffs. Results and cleanup were
+retained; the failed download was not reclassified or given a longer deadline.
+
+That investigation found inconsistent loss accounting: after a loss-triggered
+reduction, old successful replies were excluded while old timeouts remained in
+the denominator. The correction retains those successes for loss accounting
+only. A regression first reduces 8000 to 5600 requests/s for real 3% loss, then
+feeds 900 older successful replies and 18 older timeouts (1.96%). The previous
+denominator fabricated 100% loss and cut again to 3920; the corrected controller
+holds 5600. Subsequent persistent loss still cuts to 3920. Delay-backoff cohort
+exclusion, conservative loss-only timeout handling, no-feedback behavior and
+bounded pacing retain their separate regression coverage.
+
+The first candidate with the loss denominator correction still completed 7/8
+transfers; its 50 Mbps-target download delivered 7.91 Mbps before the unchanged
+deadline. It had 1729 outer expirations (0.24007%), 33 loss backoffs, and no client
+or server reader/socket drops. Regular pings were 487/492 and rapid active pings
+2120/2216 (median/p95/max 102/118/156 ms). Of the rapid failures, 95 were during
+the initial handshake wait and one occurred later. All 119 client native queue
+expirations occurred when startup traffic finally drained. No general live
+latency or throughput improvement is established by these sequential runs.
+
+Server counters show the first native handshake arrived, but its reply expired
+in the ordinary 60 ms queue: one native receive, one native expiration, and zero
+native sends. No native reply was sent until about five seconds later. The next
+correction gives exact native handshake/control packets eight bounded priority
+slots and a one-second deadline, within the same total queue capacity. Ordinary
+data deadlines remain unchanged. Tests cover a 100 ms poll gap, priority over
+data/parity, exact shapes, overload, expiry, rebase and association reset.
+
+With that correction, the exact Windows/Linux 0.5.8 binaries passed their
+smoke checks and the separate PC completed 8/8 transfers. Regular pings were
+443/443; active rapid pings were 1938/1940 (median/p95/max 96/110/142 ms).
+The server sent the handshake reply without control expiry. There were no queue
+capacity, reader or socket drops, but four client and 74 server data expirations
+remained, along with 1229 outer timeouts (0.17355%) and 18 loss backoffs. FEC
+reconstructed 267 downstream and one upstream datagram in the measured window;
+some reconstructions may have preceded reordered originals. Transfers delivered
+16.41 and 29.93 Mbps singly, 43.40 Mbps combined in parallel, 24.78 Mbps burst
+upload, 18.33 Mbps smooth upload, and 17.98/15.00 Mbps in duplex. Sampled native
+hashes still missed two downstream datagrams. This is a successful short run,
+not proof of complete path-loss recovery or long-term stability.
+
+The matched spare-slot repair run used the same final binaries, 8000 requests/s,
+2 ms reorder target, 60/350 ms data deadlines and 4096 total queue slots. It
+completed 8/8 transfers, 391/391 regular pings and 1715/1715 active rapid pings.
+Rapid ping median/p95/max was 107/116/151 ms; the idle path had moved to around
+107 ms, so the absolute median is not a controlled comparison against the
+preceding 96 ms-path run. No queue-capacity, reader, socket or host UDP errors
+occurred. One client data packet expired; server data and both handshake queues
+had zero expiry. There were 956 outer timeouts (0.14725%), 10 loss backoffs and
+110 TCP retransmissions. One sampled downstream native hash was still missing.
+
+The repair run delivered 24.47/48.92 Mbps in the single-download phases,
+40.58 Mbps combined in parallel, 24.70 Mbps burst upload, 17.56 Mbps smooth
+upload and 17.32/18.72 Mbps in duplex. All original transfer sizes, SHA256 checks
+and 30-second timeouts were retained. Raw rapid-ping failures during startup or
+cleanup are preserved separately (3 of 1794 raw samples); none fell in the
+standard measurement window. Five-second startup failure in the earlier trial
+was inside that window and remains counted as failure above.
+
+Decision: use 0.5.8 with spare-slot repair for normal operation. The bounded
+queue and accounting fixes apply in that mode; FEC remains opt-in. Both final
+modes passed exact Windows/Linux smoke checks and real Full-mode tests, but
+sequential short runs do not establish universal latency improvement, zero loss,
+DPI invisibility or long-term IP-block resistance. Earlier failed trials remain
+part of this record. Linux arm64 is cross-compiled, not runtime-tested.
+
 ## 0.5.7 interleaved recovery (2026-10-10)
 
 The optional FEC implementation passed the full Go suite and vet, exact Windows
@@ -86,8 +198,12 @@ missed the 30-second deadline. Regular pings were 544/545 and dense active pings
 2381/2383, median/p95/max 96/109/177 ms (raw 2457/2461). Outer timeouts were 2498
 (0.31299%), with 193 endpoint TCP retransmits, 521 downstream and eight upstream
 FEC reconstructions. Client queue expirations rose to 951 during duplex traffic;
-seven sampled native upload hashes were missing. Server queue expiries, reader
-drops, socket errors and host UDP error increments remained zero. All three
+seven sampled native upload hashes were missing. Server queue expiries, server
+reader drops, socket errors and host UDP error increments remained zero. A later
+per-client audit found 131 client outer-reader drops at 19:06:36 UTC, with that
+256-packet queue full. These occurred after the 951 native queue expirations
+reported at 19:06:28 UTC and are a separate local loss source. The prior compact
+summary omitted the client reader counters; they are not zero for this run. All three
 on/off/on trials retained one client association and restored the test PC's
 networking successfully; failed transfers are preserved as failed results.
 

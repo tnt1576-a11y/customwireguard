@@ -184,6 +184,44 @@ func TestAdaptiveLossOnlyRetainsConservativeTimeoutResponse(t *testing.T) {
 	}
 }
 
+func TestAdaptiveLossDenominatorKeepsSuccessfulOlderFlight(t *testing.T) {
+	start := time.Unix(1000, 0)
+	stats := new(Stats)
+	c := newExchangeControl(200, 8000, start, stats)
+	c.rate, c.srtt, c.minRTT = 8000, 100*time.Millisecond, 100*time.Millisecond
+	cut := start.Add(200 * time.Millisecond)
+	for i := 0; i < 776; i++ {
+		c.reply(cut, 100*time.Millisecond, true, true)
+	}
+	c.lost = 24
+	c.update(cut, true) // 3% measured loss still reduces immediately.
+	if c.rate != 5600 || stats.ExchangeLossBackoffs.Load() != 1 {
+		t.Fatal("real loss did not reduce rate", c.rate)
+	}
+	// An old flight produces 900 authenticated successes and 18 timeouts.
+	// It cannot justify growth/delay decisions at the new rate, but counting
+	// only its timeouts would fabricate 100% loss instead of 1.96%.
+	now := cut.Add(100 * time.Millisecond)
+	for i := 0; i < 900; i++ {
+		c.reply(now, 101*time.Millisecond, true, true)
+	}
+	c.lost = 18
+	c.update(now.Add(time.Millisecond), true)
+	if c.rate != 5600 || stats.ExchangeLossBackoffs.Load() != 1 || stats.ExchangePriorFlightReplies.Load() != 900 {
+		t.Fatal("successful old replies disappeared from loss denominator", c.rate, stats.Snapshot())
+	}
+	// Ongoing congestion is not hidden behind a blind cooldown.
+	now = now.Add(150 * time.Millisecond)
+	for i := 0; i < 100; i++ {
+		c.reply(now, 100*time.Millisecond, true, true)
+	}
+	c.lost = 20
+	c.update(now, true)
+	if c.rate != 3920 || stats.ExchangeLossBackoffs.Load() != 2 {
+		t.Fatal("fresh persistent loss failed to reduce", c.rate)
+	}
+}
+
 func TestAdaptiveResumesOnlyRecentDeliveredCapacity(t *testing.T) {
 	now := time.Unix(1000, 0)
 	s := new(Stats)

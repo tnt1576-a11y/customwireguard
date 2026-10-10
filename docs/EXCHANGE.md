@@ -1,5 +1,39 @@
 # Experimental request/reply UDP
 
+## Queue fixes in 0.5.8
+
+Loss-only backoffs now keep successful replies from the older sending flight
+in the loss denominator, matching the older timeouts that are already counted.
+Those replies still cannot justify growth or a delay decision at the reduced
+rate. Delay-triggered reductions continue excluding both successes and timeouts
+from their older flight. The loss threshold, reduction factor, growth cooldown,
+request ceiling and timeout are unchanged; continued loss still reduces rate.
+
+The burst-mode client hands outer replies to the event loop through a fixed
+1024-packet channel (previously 256). It consumes packets immediately; there is
+no wait for a batch. Original socket-read timestamps and native queue deadlines
+are retained. The server's unauthenticated public input remains bounded at 256.
+
+Small native packets still have 128 reserved queue slots. When there is unused
+total capacity they may borrow up to another 128 slots, with the same short
+deadline and four-small-to-one-bulk service rule. The total configured capacity
+does not grow. `exchange_small_queue_full` and `exchange_bulk_queue_full` now
+identify which data class rejects a packet. Together with
+`exchange_control_queue_full`, their sum is `exchange_queue_full`.
+
+Native handshake initiation, reply and cookie packets have a separate eight-slot
+priority queue within the same total capacity. Their one-second deadline covers
+brief idle polling gaps that would otherwise force a native handshake retry.
+Exact native type words and lengths select this queue; ordinary encrypted data
+keeps its existing deadline. Handshakes are not copied or retransmitted by CWG.
+`exchange_control_sent` and `exchange_control_expired` distinguish their outcomes.
+
+FEC defers parity when either original queue has spent half its deadline.
+Originals continue under the normal priority rule. Deferred parity keeps its
+50 ms lifetime and fixed bound; `exchange_fec_deferred` counts scheduling
+decisions, not unique packets. This prevents recoverable redundancy from
+consuming slots needed by originals that have not yet been encoded.
+
 ## Optional interleaved recovery in 0.5.7
 
 `exchange_fec: true` selects authenticated, interleaved XOR recovery. It requires
@@ -39,8 +73,8 @@ unchanged even when FEC recovers the enclosed native data.
 Controlled tests cover real WireGuard with isolated and four-packet burst loss
 in both directions, malformed metadata, bounded state, legacy compatibility and
 the exact Windows/Linux executables. Target-network results were mixed, so the
-regular deployment retains 0.5.6 spare-slot repair and FEC defaults off; see
-[validation](VALIDATION.md#057-interleaved-recovery-2026-10-10).
+regular deployment uses the corrected 0.5.8 build with spare-slot repair and
+FEC defaults off; see [validation](VALIDATION.md#058-bounded-queue-corrections-2026-10-10).
 This changes loss tolerance, not the observable outer packet format,
 and makes no promise of DPI invisibility or protection from IP blocking.
 

@@ -23,8 +23,13 @@ Completion requires all of the following, not just the transport experiment:
   resource use and revocation. Provide tested provisioning/export instructions
   for giving a separate bundle to another user; sharing one bundle is insufficient.
 
-Current implementation baseline: 0.5.6; its optional spare-slot repair is tested,
-but residual loss remains. The items below remain incomplete until their relevant
+Current implementation baseline: 0.5.8 with spare-slot repair. Bounded queue,
+handshake deadline and loss-accounting corrections passed controlled regressions
+and a final separate-PC run with 8/8 transfers and 1715/1715 active rapid pings.
+Residual loss remains (0.14725% outer timeouts and one client data expiry in that
+run); this is not a long-term reliability or general latency guarantee. The
+installer, app splitting, Telegram and independent-user features below remain
+incomplete until their relevant
 source, runtime tests and operator-facing deliverables demonstrate completion.
 
 ## Two or three independent users
@@ -59,5 +64,5 @@ Verify application include/exclude behavior, process children and executable
 paths, DNS and IPv6 behavior, local LAN/RDP access, and reconnect/cleanup. Test
 both selected-application and excluded-application modes without accidentally
 routing the carrier back into the tunnel. Preserve the existing native client
-until the alternative has passed user-run tests. No WireSock driver, adapter,
+until the alternative has passed tests on the separate PC. No WireSock driver, adapter,
 application policy or route changes are part of the current performance update.

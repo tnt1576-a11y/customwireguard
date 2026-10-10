@@ -246,3 +246,88 @@ func TestFECDoesNotSpendSmallPacketDeadlineOnParity(t *testing.T) {
 		t.Fatal("parity delayed a small original near its deadline")
 	}
 }
+
+func TestFECOriginalDeadlineWinsDuringConstrainedDuplexBurst(t *testing.T) {
+	now := time.Unix(1000, 0)
+	stats := new(Stats)
+	s := fecSender{stats: stats}
+	q := newExchangeQueue(config.Config{ExchangeQueueMS: 60, ExchangeBurstMS: 350, ExchangeQueuePackets: 4096}, stats)
+	// A burst has already spent 200 ms behind a reduced-rate flight. There is
+	// enough remaining scheduled capacity for originals, but not for a full
+	// parity share. Never extend original deadlines to make this test pass.
+	for i := 0; i < 1000; i++ {
+		q.push(fecNative(i, 1120), now.Add(-200*time.Millisecond))
+	}
+	bulk, small, parityCount := 0, 0, 0
+	for slot := 0; slot < 1600; slot++ {
+		at := now.Add(time.Duration(slot) * 125 * time.Microsecond)
+		if slot%80 == 0 {
+			q.push(fecNative(1000+slot, 64), at)
+		}
+		p, parity := s.next(&q, at)
+		if parity {
+			parityCount++
+		} else if len(p) > 0 {
+			if len(p)-fecHeader == 64 {
+				small++
+			} else {
+				bulk++
+			}
+		}
+	}
+	if bulk != 1000 || small != 20 || stats.ExchangeQueueExpired.Load() != 0 {
+		t.Fatal("parity consumed original delivery capacity", bulk, small, stats.Snapshot())
+	}
+	if stats.ExchangeFECDeferred.Load() == 0 || stats.ExchangeFECExpired.Load() == 0 || parityCount == 0 {
+		t.Fatal("backups were not bounded/deferred or failed to resume", parityCount, stats.Snapshot())
+	}
+	if stats.ExchangeSmallDelayMaxUS.Load() > 125 {
+		t.Fatal("bulk pressure delayed interactive originals", stats.Snapshot())
+	}
+}
+
+func TestFECSmallBurstBorrowsUnusedCapacityWithoutExtendingDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	stats := new(Stats)
+	s := fecSender{stats: stats}
+	q := newExchangeQueue(config.Config{ExchangeQueueMS: 60, ExchangeBurstMS: 350, ExchangeQueuePackets: 4096}, stats)
+	for i := 0; i < 1024; i++ {
+		q.push(fecNative(i, 1120), now)
+	}
+	// A measured startup burst filled 128 small slots and rejected 54 more,
+	// despite unused total capacity. Include a fresh interactive arrival.
+	for i := 0; i < 182; i++ {
+		q.push(fecNative(2000+i, 64), now)
+	}
+	small, bulk := 0, 0
+	for slot := 0; slot < 2000; slot++ {
+		at := now.Add(time.Duration(slot) * 125 * time.Microsecond)
+		if slot == 8 {
+			q.push(fecNative(3000, 64), at)
+		}
+		p, parity := s.next(&q, at)
+		if len(p) == 0 || parity {
+			continue
+		}
+		if len(p)-fecHeader == 64 {
+			small++
+		} else {
+			bulk++
+		}
+	}
+	if small != 183 || bulk != 1024 || stats.ExchangeQueueDropped.Load() != 0 || stats.ExchangeSmallDelayMaxUS.Load() > 40000 {
+		t.Fatal("borrowed capacity lost burst or delayed small traffic", small, bulk, stats.Snapshot())
+	}
+	// Borrowing is bounded even when the bulk queue is empty. It does not
+	// convert the short deadline into the bulk deadline under overload.
+	for i := 0; i < 300; i++ {
+		q.push(fecNative(4000+i, 64), now)
+	}
+	if q.length() != 256 || stats.ExchangeSmallQueueFull.Load() != 44 || stats.ExchangeBulkQueueFull.Load() != 0 {
+		t.Fatal("small borrowing bound or attribution failed", stats.Snapshot())
+	}
+	q.expire(now.Add(61 * time.Millisecond))
+	if q.length() != 0 || stats.ExchangeQueueExpired.Load() != 256 {
+		t.Fatal("small deadline was extended", stats.Snapshot())
+	}
+}

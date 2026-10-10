@@ -20,6 +20,7 @@ type exchangeItem struct {
 type exchangeQueue struct {
 	items    []exchangeItem
 	small    []exchangeItem
+	control  []exchangeItem
 	stats    *Stats
 	maxAge   time.Duration
 	burstAge time.Duration
@@ -40,9 +41,9 @@ func newExchangeQueue(cfg config.Config, stats *Stats) exchangeQueue {
 	return q
 }
 
-func (q *exchangeQueue) length() int { return len(q.items) + len(q.small) }
+func (q *exchangeQueue) length() int { return len(q.items) + len(q.small) + len(q.control) }
 func (q *exchangeQueue) rebase(now time.Time) {
-	for _, items := range [][]exchangeItem{q.items, q.small} {
+	for _, items := range [][]exchangeItem{q.items, q.small, q.control} {
 		for i := range items {
 			items[i].at = now
 		}
@@ -58,16 +59,22 @@ func (q *exchangeQueue) expire(now time.Time) {
 	if limit == 0 {
 		limit = 500 * time.Millisecond
 	}
-	for i, queue := range []*[]exchangeItem{&q.items, &q.small} {
+	for i, queue := range []*[]exchangeItem{&q.items, &q.small, &q.control} {
 		deadline := limit
 		if i == 0 && q.burstAge > 0 {
 			deadline = max(limit, q.burstAge)
+		}
+		if i == 2 {
+			deadline = time.Second
 		}
 		for len(*queue) > 0 && now.Sub((*queue)[0].at) > deadline {
 			(*queue)[0] = exchangeItem{}
 			*queue = (*queue)[1:]
 			q.stats.ExchangeQueueDropped.Add(1)
 			q.stats.ExchangeQueueExpired.Add(1)
+			if i == 2 {
+				q.stats.ExchangeControlExpired.Add(1)
+			}
 		}
 	}
 	q.gauge()
@@ -80,12 +87,21 @@ func (q *exchangeQueue) push(data []byte, now time.Time) {
 	}
 	queue := &q.items
 	full := q.length() >= capacity
-	if q.burstAge > 0 {
+	if nativeHandshake(data) {
+		// Handshake replies must survive a brief idle polling gap. They are
+		// never duplicated, have a separate one-second deadline, and cannot
+		// grow beyond eight packets or the shared total capacity.
+		queue = &q.control
+		full = full || len(q.control) >= 8
+	} else if q.burstAge > 0 {
 		// Size is the only hint available for encrypted WireGuard packets.
 		// Reserve bounded room for small packets, without claiming flow identity.
 		if len(data) <= 256 {
 			queue = &q.small
-			full = full || len(q.small) >= 128
+			// The 128-slot reservation is a minimum, not a hard partition.
+			// Short ACK/control bursts may borrow another 128 unused slots;
+			// total capacity and the small-packet deadline remain unchanged.
+			full = full || len(q.small) >= 256
 		} else {
 			full = full || len(q.items) >= capacity-128
 		}
@@ -93,6 +109,13 @@ func (q *exchangeQueue) push(data []byte, now time.Time) {
 	if full {
 		q.stats.ExchangeQueueDropped.Add(1)
 		q.stats.ExchangeQueueFull.Add(1)
+		if queue == &q.control {
+			q.stats.ExchangeControlQueueFull.Add(1)
+		} else if queue == &q.small {
+			q.stats.ExchangeSmallQueueFull.Add(1)
+		} else {
+			q.stats.ExchangeBulkQueueFull.Add(1)
+		}
 		return
 	}
 	*queue = append(*queue, exchangeItem{data, now})
@@ -107,7 +130,10 @@ func (q *exchangeQueue) pop(now time.Time) []byte {
 	queue := &q.items
 	// At most four small packets may pass a waiting bulk packet. Keep order
 	// within each class and prevent either class starving the other.
-	if len(q.small) > 0 && (len(q.items) == 0 || q.smallRun < 4) {
+	if len(q.control) > 0 {
+		queue = &q.control
+		q.stats.ExchangeControlSent.Add(1)
+	} else if len(q.small) > 0 && (len(q.items) == 0 || q.smallRun < 4) {
 		queue = &q.small
 		q.smallRun++
 		q.stats.ExchangeSmallSent.Add(1)
@@ -126,8 +152,26 @@ func (q *exchangeQueue) clear() {
 	q.stats.ExchangeQueueDropped.Add(uint64(q.length()))
 	q.items = nil
 	q.small = nil
+	q.control = nil
 	q.smallRun = 0
 	q.gauge()
+}
+
+// WireGuard types include three reserved zero bytes. Match the complete type
+// word and exact protocol length; encrypted data (type 4) keeps its data class.
+func nativeHandshake(p []byte) bool {
+	if len(p) < 4 {
+		return false
+	}
+	switch binary.LittleEndian.Uint32(p[:4]) {
+	case 1:
+		return len(p) == 148
+	case 2:
+		return len(p) == 92
+	case 3:
+		return len(p) == 64
+	}
+	return false
 }
 
 type exchangeFlight struct {

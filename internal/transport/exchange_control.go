@@ -14,6 +14,7 @@ type exchangeControl struct {
 	srtt, minRTT, epochMin time.Duration
 	epoch, cooldown        time.Time
 	acks, useful, lost     int
+	lossAcks               int
 	backlog                bool
 	quiet                  int
 	provenRate             int
@@ -58,6 +59,13 @@ func (c *exchangeControl) reply(now time.Time, rtt time.Duration, useful, more b
 		c.minRTT = rtt
 	}
 	c.stats.ExchangeRTTUS.Store(uint64(c.srtt.Microseconds()))
+	// Loss-only reductions keep pre-reduction timeouts, so their successful
+	// replies must also stay in the loss denominator. Excluding those replies
+	// turns a small delayed loss batch into apparent 100% loss for one RTT.
+	// Delay reductions exclude both sides of that older flight instead.
+	if !now.Add(-rtt).Before(c.delayReduction) {
+		c.lossAcks++
+	}
 	// Feedback for requests sent before the latest reduction describes the
 	// previous sending rate. Keep its RTT and delivery accounting, but do not
 	// use it to reduce again or justify growth at the new rate. Payloads are
@@ -83,7 +91,7 @@ func (c *exchangeControl) update(now time.Time, uploadPending bool) {
 	}
 	old := c.rate
 	elapsed := now.Sub(c.epoch)
-	total := c.acks + c.lost
+	total := c.lossAcks + c.lost
 	loss := total >= 16 && c.lost*100 > total*2
 	delay := c.acks >= 16 && c.epochMin > c.minRTT+25*time.Millisecond
 	if loss || delay {
@@ -139,6 +147,7 @@ func (c *exchangeControl) update(now time.Time, uploadPending bool) {
 	c.epoch = now
 	c.epochMin = 0
 	c.acks = 0
+	c.lossAcks = 0
 	c.useful = 0
 	c.lost = 0
 	c.backlog = false

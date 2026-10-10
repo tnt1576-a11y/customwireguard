@@ -140,12 +140,21 @@ func (s *fecSender) popParity(now time.Time) []byte {
 
 // Parity shares the existing request ceiling; no extra outer packets or timer.
 // Small originals can pass at most four times while parity is ready. This keeps
-// recovery available under bulk load without unbounded priority inversion.
+// recovery available under bulk load. Once either original queue spends half
+// its deadline, originals take precedence: parity cannot recover a packet that
+// expires before encoding. The existing parity expiry bounds deferred work.
 func (s *fecSender) next(q *exchangeQueue, now time.Time) (payload []byte, parity bool) {
 	q.expire(now)
 	s.flush(now)
+	if len(q.control) > 0 {
+		return q.pop(now), false
+	}
 	urgentSmall := len(q.small) > 0 && now.Sub(q.small[0].at) >= q.maxAge/2
-	if s.count > 0 && (len(q.small) == 0 || (s.originals >= 4 && !urgentSmall)) {
+	bulkAge := max(q.maxAge, q.burstAge)
+	urgentBulk := len(q.items) > 0 && now.Sub(q.items[0].at) >= bulkAge/2
+	if s.count > 0 && (urgentSmall || urgentBulk) {
+		s.stats.ExchangeFECDeferred.Add(1)
+	} else if s.count > 0 && (len(q.small) == 0 || s.originals >= 4) {
 		return s.popParity(now), true
 	}
 	p := q.pop(now)
