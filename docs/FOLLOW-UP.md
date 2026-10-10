@@ -60,11 +60,16 @@ that use CWG and applications that use the normal connection. The user requested
 this because WireSock offers application selection; WireSock integration or an
 alternative Windows implementation can satisfy the requirement.
 
-Compatibility is not yet established. Evaluate a WireSock native WireGuard peer
-pointed at CWG's local UDP carrier, with CWG itself using the physical interface.
+WireSock Secure Connect 3.6.1.1 was tested on the separate Windows PC. Direct
+loopback connection failed with a route-selection error. Its local SOCKS5 UDP
+comparison completed the control handshake but delivered no UDP to the local
+relay. This is not a usable integration. See APP-TUNNEL.md for the evidence and
+the userspace WireGuard alternative that passed an initial tunneled HTTPS test.
+Application selection is still unimplemented and must pass the remaining checks.
 Verify application include/exclude behavior, process children and executable
 paths, DNS and IPv6 behavior, local LAN/RDP access, and reconnect/cleanup. Test
 both selected-application and excluded-application modes without accidentally
 routing the carrier back into the tunnel. Preserve the existing native client
-until the alternative has passed tests on the separate PC. No WireSock driver, adapter,
-application policy or route changes are part of the current performance update.
+until the alternative has passed tests on the separate PC. The WireSock test
+installation was removed; the original WireGuard client, route and IPv6 binding
+remain in place. No WireSock changes were made on the controller PC.
