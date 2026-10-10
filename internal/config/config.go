@@ -34,6 +34,7 @@ type Config struct {
 	ExchangeQueuePackets int    `json:"exchange_queue_packets,omitempty"`
 	ExchangeReorderMS    int    `json:"exchange_reorder_ms,omitempty"`
 	ExchangeRepair       bool   `json:"exchange_repair,omitempty"`
+	ExchangeFEC          bool   `json:"exchange_fec,omitempty"`
 }
 
 func Load(path string, mode string) (Config, error) {
@@ -114,6 +115,9 @@ func (c Config) Validate(mode string) error {
 	}
 	if c.ExchangeRepair && (c.Transport != "exchange" || (mode == "client" && c.ExchangeMaxPPS == 0)) {
 		return errors.New("exchange_repair requires exchange transport and an adaptive client")
+	}
+	if c.ExchangeFEC && (c.Transport != "exchange" || c.ExchangeRepair || (mode == "client" && c.ExchangeMaxPPS == 0)) {
+		return errors.New("exchange_fec requires exchange transport, an adaptive client, and exchange_repair disabled")
 	}
 	if c.PaceKbps != 0 && (c.PaceKbps < 128 || c.PaceKbps > 100000) {
 		return errors.New("pace_kbps must be zero or 128..100000")

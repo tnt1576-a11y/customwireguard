@@ -37,11 +37,14 @@ def main():
     transport = sys.argv[4] if len(sys.argv) > 4 else 'raw'
     reorder_ms = int(sys.argv[5]) if len(sys.argv) > 5 else 0
     repair = bool(int(sys.argv[6])) if len(sys.argv) > 6 else False
+    fec = bool(int(sys.argv[7])) if len(sys.argv) > 7 else False
     assert transport in ('raw', 'exchange') and not (pace and transport == 'exchange')
     assert 0 <= reorder_ms <= 5 and (not reorder_ms or transport == 'exchange')
     assert not repair or transport == 'exchange'
+    assert not fec or (transport == 'exchange' and not repair)
     sizes = (32, 148, 1280, 1312 if transport == 'exchange' else 1364)
     processes = []
+    stderr_files = []
     sockets = []
     failed = True
     with tempfile.TemporaryDirectory(prefix='cwg-release-smoke-') as temporary:
@@ -60,9 +63,10 @@ def main():
                 cfg['transport'] = transport
                 if transport == 'exchange':
                     cfg['exchange_pps'] = 100
-                    if reorder_ms or repair:
+                    if reorder_ms or repair or fec:
                         cfg['exchange_reorder_ms'] = reorder_ms
                         cfg['exchange_repair'] = repair
+                        cfg['exchange_fec'] = fec
                         # Preserve the fixed-rate smoke's 500 ms burst budget
                         # while exercising the adaptive-only client receiver.
                         cfg['exchange_queue_ms'] = 500
@@ -74,10 +78,12 @@ def main():
             outer_reservation.close()
             local_reservation.close()
             for mode in ('server', 'client'):
+                stderr_file = (root / f'{mode}.stderr').open('w+b')
+                stderr_files.append(stderr_file)
                 processes.append(subprocess.Popen(
                     [str(exe), mode, '-config', str(bundle / f'{mode}.json'),
                      '-trace', str(root / f'{mode}-packets.jsonl')] + (interface_args if mode == 'client' else []),
-                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL, stderr=stderr_file,
                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)))
             # Process creation returns before sockets bind. Use an authenticated
             # readiness check before sending our non-retransmitted test payload.
@@ -117,7 +123,7 @@ def main():
                             first = now
                         assert got == message, f'{direction} burst changed, reordered or lost data'
                     elapsed = time.monotonic() - first
-                    ceiling = 9000 if reorder_ms or repair else 100
+                    ceiling = 9000 if reorder_ms or repair or fec else 100
                     minimum = (len(messages)-1) * (1200+48) * 8 / (pace*1000) if pace else (len(messages)-1)/ceiling
                     assert elapsed >= minimum * 0.75, f'{direction} pacing not applied: {elapsed}'
                     burst_elapsed[direction] = round(elapsed, 4)
@@ -144,6 +150,34 @@ def main():
                     finally:
                         receiver.settimeout(5)
                 repair_checked = True
+            if fec:
+                for source, target, receiver in [(wg,(target_host,int(target_port)),backend),(backend,peer,wg)]:
+                    packet = b'\x04\x00\x00\x00' + secrets.token_bytes(1084)
+                    source.sendto(packet,target)
+                    assert receiver.recvfrom(65535)[0] == packet, 'FEC changed native data'
+                    receiver.settimeout(.1)
+                    try:
+                        receiver.recvfrom(65535)
+                        raise AssertionError('Parity or reconstructed duplicate escaped FEC decoder')
+                    except socket.timeout:
+                        pass
+                    finally:
+                        receiver.settimeout(5)
+                # Adaptive configurations report every five seconds. Wait for
+                # actual evidence, not a sleep shorter than that interval.
+                deadline = time.monotonic() + 8
+                while True:
+                    observed = []
+                    for mode in ('server', 'client'):
+                        complete = (root / f'{mode}.stderr').read_bytes().split(b'\n')[:-1]
+                        samples = [json.loads(line) for line in complete if line.startswith(b'{')]
+                        observed.append(any(row.get('exchange_fec_data', 0) > 0 and
+                                            row.get('exchange_fec_parity', 0) > 0 for row in samples))
+                    if all(observed):
+                        break
+                    assert all(p.poll() is None for p in processes), 'Transport stopped before FEC counters'
+                    assert time.monotonic() < deadline, 'Exact executable did not exercise FEC parity in both directions'
+                    time.sleep(.05)
             attacker = udp()
             sockets.append(attacker)
             server_host, server_port = server_address.rsplit(':', 1)
@@ -183,20 +217,25 @@ def main():
                               'live_session_preserved': True, 'socket_traces_correlated': True,
                               'pace_kbps': pace, 'burst_seconds': burst_elapsed,
                               'repair_copies_verified': repair_checked,
+                              'fec_enabled': fec,
                               'os_routes_changed': False}, indent=2))
             failed = False
         finally:
-            for process in processes:
+            for process, stderr_file in zip(processes, stderr_files):
                 if process.poll() is None:
                     process.terminate()
                 try:
-                    _, stderr = process.communicate(timeout=5)
+                    process.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
-                    _, stderr = process.communicate()
+                    process.communicate()
+                stderr_file.seek(0)
+                stderr = stderr_file.read()
                 if failed or process.returncode not in (0, 1, -15, 3221225786):
                     # Diagnostics contain only aggregate counts, not configurations.
                     sys.stderr.write(stderr.decode(errors='replace'))
+            for stderr_file in stderr_files:
+                stderr_file.close()
             for s in sockets:
                 s.close()
 

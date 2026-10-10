@@ -1,4 +1,48 @@
-# Experimental request/reply UDP (0.4.0 through 0.5.6)
+# Experimental request/reply UDP
+
+## Optional interleaved recovery in 0.5.7
+
+`exchange_fec: true` selects authenticated, interleaved XOR recovery. It requires
+exchange transport, an adaptive client, and `exchange_repair` disabled. Both
+endpoints must support and enable it. A capability in the authenticated preflight
+and bootstrap makes an incompatible endpoint fail before the Windows helper
+changes routes. A capable server still accepts legacy clients without FEC.
+
+Four interleaved groups hold up to four native WireGuard data packets each.
+Originals are forwarded immediately; one parity packet per group can reconstruct
+one missing original. This can tolerate four consecutive original-packet losses
+when the losses occupy separate groups and their parity arrives. Two missing
+originals in one group remain unrecoverable. Native WireGuard still authenticates
+every reconstructed datagram; FEC does not replace either encryption layer.
+
+Partial groups flush after an 8 ms target when the scheduler next runs. Parity
+expires 50 ms after the group's first original and shares the existing scheduled
+request slots, including during bulk load. Small originals retain priority, with
+bounded turns for parity; an urgent small original can defer parity further.
+There is no acknowledgement-driven retransmission or reliable outer stream.
+Parity consumes capacity, so useful throughput can decrease. The fixed group and
+parity bounds prevent unlimited buffering, and all state resets on association
+changes. Receive groups have a 250 ms recovery lifetime and 128 fixed slots.
+
+The framing is inside the encrypted exchange payload. Handshakes and native
+packets above 1280 bytes pass in their original format; this preserves the existing
+native MTU limit but leaves those larger datagrams without FEC. The current
+1088-byte IP MTU keeps ordinary native data within the protected size.
+
+Counters `exchange_fec_data`, `exchange_fec_parity`, `exchange_fec_recovered`,
+`exchange_fec_expired`, `exchange_fec_skipped`, `exchange_fec_invalid`, and
+`exchange_fec_late` distinguish these events. Recovery can include reconstructing
+a reordered original before it arrives, so it is not an exact path-loss count.
+Parity expiry is not a dropped primary packet. Outer `exchange_expired` remains
+unchanged even when FEC recovers the enclosed native data.
+
+Controlled tests cover real WireGuard with isolated and four-packet burst loss
+in both directions, malformed metadata, bounded state, legacy compatibility and
+the exact Windows/Linux executables. Target-network results were mixed, so the
+regular deployment retains 0.5.6 spare-slot repair and FEC defaults off; see
+[validation](VALIDATION.md#057-interleaved-recovery-2026-10-10).
+This changes loss tolerance, not the observable outer packet format,
+and makes no promise of DPI invisibility or protection from IP blocking.
 
 ## Optional stability protection in 0.5.6
 

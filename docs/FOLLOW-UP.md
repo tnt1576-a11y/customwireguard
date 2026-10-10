@@ -1,5 +1,32 @@
 # Follow-up requirements
 
+## Active implementation objective
+
+The user has authorized continued automatic testing on the separate LAN Windows
+PC, with stability and loaded latency taking priority over speed. The controller
+PC must not connect/disconnect CWG or have its networking changed for these tests.
+
+Completion requires all of the following, not just the transport experiment:
+
+- Improve tolerance of remaining packet loss and timeouts, validate with actual
+  WireGuard and controlled isolated/burst loss, then compare on the separate PC.
+  Preserve failed results and report residual loss; do not infer DPI intent.
+- Deliver a repeatable installer for a fresh Linux server, including prerequisites,
+  forwarding/NAT, service hardening, credentials, verification and recovery.
+- Implement Windows application include/exclude split tunneling with usable
+  controls, using WireSock if it passes compatibility testing or a dedicated GUI
+  client if necessary. Verify DNS, IPv6, child-process behavior and LAN access.
+- Add optional lightweight Telegram monitoring/management with authorized owner
+  checks, bounded polling/resources, protected secrets and explicit management
+  commands. Verify behavior and measure idle/active resource cost.
+- Support two or three simultaneous users with independent credentials, fair
+  resource use and revocation. Provide tested provisioning/export instructions
+  for giving a separate bundle to another user; sharing one bundle is insufficient.
+
+Current implementation baseline: 0.5.6; its optional spare-slot repair is tested,
+but residual loss remains. The items below remain incomplete until their relevant
+source, runtime tests and operator-facing deliverables demonstrate completion.
+
 ## Two or three independent users
 
 Target workload: at most two or three people gaming, browsing, streaming video

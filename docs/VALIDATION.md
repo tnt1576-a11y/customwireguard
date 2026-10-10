@@ -3,6 +3,102 @@
 Updated on 2026-10-10. Local and user-run server/path results are recorded below;
 sustained Full-mode internet reliability remains unverified.
 
+## 0.5.7 interleaved recovery (2026-10-10)
+
+The optional FEC implementation passed the full Go suite and vet, exact Windows
+and Linux amd64 executable smoke tests, and real WireGuard integration with
+isolated native-data losses and four consecutive original losses in each
+direction. Tests also cover legacy clients, incompatible preflight rejection,
+malformed metadata, multiple-loss limits, bounded state, immediate originals,
+partial-group expiry, parity scheduling and preserving the existing MTU limit.
+The cold synthetic burst fixture uses a 500 ms queue deadline to isolate recovery
+from startup ramp-up; it does not establish a 60 ms cold-burst delivery guarantee.
+
+The separate Windows test PC ran the same eight verified transfers (281.25 MB)
+and concurrent 20 Hz pings. Both profiles used a ceiling of 8000 requests/s,
+2 ms reorder target, 60/350 ms small/bulk deadlines and 1088-byte IP MTU.
+The comparison replaced spare-slot repair with FEC; it did not change encryption
+or the outer UDP request/reply sizing. Each test's SYSTEM cleanup succeeded.
+
+| Profile | Transfers | Regular pings | Dense active pings | Dense median / p95 / max ms | Client queue expiry | Outer timeouts |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| Fresh 0.5.6 baseline | 8/8 | 488/489 | 2143/2143 | 96 / 109 / 133 | 381 | 1676 (0.22625%) |
+| FEC candidate A | 8/8 | 504/504 | 2196/2197 | 94 / 105 / 144 | 1 | 1496 (0.18854%) |
+| Same FEC candidate B | 8/8 | 448/449 | 1978/1979 | 97 / 106 / 123 | 84 | 1136 (0.16067%) |
+
+Dense active windows span the first through last regular measurement ping. Raw
+counts including startup/shutdown are 2205/2222, 2260/2274 and 2054/2057. The
+candidate B regular and dense losses occurred during the initial idle phase;
+they remain included. Server active queue expirations were 1/0/0 respectively.
+No reader drops, full-queue drops, socket errors or host UDP error increments
+were recorded. Each run retained one association. Endpoint TCP retransmits were
+165/107/189; no consistent retransmit improvement is claimed.
+
+FEC A reconstructed 296 downstream and 14 upstream datagrams; B reconstructed
+269 and 6. These counters include reconstruction before a reordered original,
+not just confirmed network loss. Both reported zero invalid, oversized-skipped
+or late FEC frames. Sampled native hashes still had one missing downstream hash
+in A and one in each direction in B. FEC is not a solution for all loss patterns.
+
+Candidate single download rates ranged 15.93-23.02 Mbps; burst uploads were
+24.78-24.79 Mbps, smooth uploads 18.21-18.91 Mbps, and duplex uploads/downloads
+18.39-19.06 / 24.39-24.41 Mbps. The baseline duplex result was 10.5 / 8.8 Mbps.
+These early sequential observations motivated further FEC testing, but changing
+path conditions prevent attributing all differences to it.
+They do not demonstrate ping-loss elimination or permanent DPI resistance.
+
+A 20-second server sample during candidate A upload activity averaged 39.54%
+total CPU busy (46% maximum), with CWG averaging 32.41% (36.26% maximum).
+A later service memory snapshot was 16,072,704 bytes. These single-client
+measurements are not a two- or three-user capacity test.
+
+The first exact 0.5.7 release run subsequently completed only 6/8 transfers.
+The 50 Mbps-target download received 47,460,776 of 62,500,000 bytes, and one
+parallel download received 28,053,912 of 31,250,000 bytes before their unchanged
+30-second deadlines. Both are failures, not verified transfers. Regular pings
+were 585/587; dense active pings were 2562/2563 with 96/109/143 ms median/p95/max
+(raw 2637/2641). Outer timeouts rose to 3123 (0.36794%); endpoint TCP snapshots
+recorded 1075 retransmits. There was one client queue expiry and zero server
+queue expiries, reader/socket drops or host UDP error increments. FEC reconstructed
+502 downstream datagrams but still missed one sampled native downstream hash.
+The final-binary failure prompted a matched FEC-off control; the two favorable
+candidate runs alone are insufficient to establish consistent live improvement.
+
+The release smoke fixture also needed a timing correction: it previously waited
+1.1 seconds for counters emitted every five seconds. It now waits for actual
+positive data/parity counters in both process logs before reporting success.
+The exact Windows and Linux amd64 binaries then passed; runtime code was unchanged.
+
+The matched control used the same 0.5.7 binaries, ceiling and queues, with FEC
+disabled and spare-slot repair enabled on both sides. It also completed 6/8
+transfers; the 50 Mbps-target download and one parallel download hit their
+deadlines. Dense active pings were 2564/2564, median/p95/max 102/118/141 ms
+(raw 2637/2641), and regular pings were 590/590. Outer timeouts remained similar
+at 3052 (0.34353%), with three client queue expiries, no server queue expiries,
+and 233 endpoint TCP retransmits. No sampled native hash was missing, although
+backup copies can mask original losses. Similar deadline failures with FEC off
+show that FEC overhead alone does not explain the changing transfer outcomes;
+the control's loss-free ping result also prevents claiming FEC always improves
+interactive loss. A final FEC-restored comparison follows this control.
+
+The restored FEC run completed 7/8 transfers; its 50 Mbps-target download again
+missed the 30-second deadline. Regular pings were 544/545 and dense active pings
+2381/2383, median/p95/max 96/109/177 ms (raw 2457/2461). Outer timeouts were 2498
+(0.31299%), with 193 endpoint TCP retransmits, 521 downstream and eight upstream
+FEC reconstructions. Client queue expirations rose to 951 during duplex traffic;
+seven sampled native upload hashes were missing. Server queue expiries, reader
+drops, socket errors and host UDP error increments remained zero. All three
+on/off/on trials retained one client association and restored the test PC's
+networking successfully; failed transfers are preserved as failed results.
+
+Decision: retain the 0.5.6 repair profile for normal use. The 0.5.7 FEC feature
+is available as an opt-in experiment, not a demonstrated general replacement.
+The Linux deployment and stopped lab kit were restored to 0.5.6. The controller
+bundle was not changed or activated during these experiments. Next work must
+address recovery traffic competing with fresh packets during reduced capacity,
+and distinguish losses before encoding from losses FEC can reconstruct. The
+installer, per-application splitting, Telegram and multi-user work remain active.
+
 ## Passed locally
 
 - Real WireGuard Noise handshake over CWG and real loopback UDP sockets, followed

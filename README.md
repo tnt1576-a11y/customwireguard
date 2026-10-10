@@ -5,15 +5,15 @@ carrier**. It carries complete native WireGuard datagrams and remains UDP-only;
 there is no TCP fallback. Each authenticated request permits one same-sized
 response; the server queues return traffic until the client requests it.
 See [request/reply mode and its bandwidth cost](docs/EXCHANGE.md).
-Version 0.5.6 adds optional short reordering protection and one delayed backup
-copy of native WireGuard data in otherwise empty scheduled exchange slots.
-Original traffic takes priority; copies expire quickly and the packet-rate
-ceiling is unchanged by the feature. The current stability profile uses a
-8000 requests/s ceiling, a 2 ms reorder target and repair on both endpoints.
-Controlled tests recover deliberately dropped data in both directions. Live
-Windows tests still show outer reply timeouts: this reduces their possible
-application impact, rather than establishing a loss-free path. See the
-[stability experiment results](docs/VALIDATION.md#056-stability-experiments-2026-10-10).
+Version 0.5.7 adds optional interleaved recovery (`exchange_fec`) that can recover
+one lost native datagram in each small group without waiting for a retransmission.
+Parity shares scheduled slots even during bulk traffic, consuming some capacity.
+Capability negotiation prevents silently enabling it against an incompatible
+server. Controlled loss recovery passed, but live results were mixed: two early
+runs completed all transfers, while later FEC-on/off/on runs completed 6/8, 6/8
+and 7/8. FEC remains experimental and defaults off. Normal use retains the
+0.5.6 profile: 8000 requests/s, 2 ms reordering and spare-slot backup copies.
+See the [recovery results and limits](docs/VALIDATION.md#057-interleaved-recovery-2026-10-10).
 
 Version 0.5.5 prevents old timeouts after a delay-triggered rate reduction from
 counting the same disturbance again. New counters distinguish loss and delay

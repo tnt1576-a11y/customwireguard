@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -60,9 +61,20 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 	}
 	channels, cleanup := readersSized(ctx, stats, capacities, conn, backend)
 	defer cleanup()
-	delivery := newExchangeReorder(cfg.ExchangeReorderMS, stats, func(data []byte) {
+	var active, pending *association
+	fecReceive := &fecReceiver{stats: stats, emit: func(data []byte) {
 		if send(backend, zeroAddr, data, stats) {
 			stats.Received.Add(1)
+		}
+	}}
+	defer fecReceive.reset()
+	fecSend := &fecSender{stats: stats}
+	defer fecSend.reset()
+	delivery := newExchangeReorder(cfg.ExchangeReorderMS, stats, func(data []byte) {
+		if active != nil && active.fec {
+			fecReceive.push(data, time.Now())
+		} else {
+			fecReceive.emit(data)
 		}
 	})
 	defer delivery.reset()
@@ -70,7 +82,6 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 	defer repair.reset()
 	pacer := newPacketPacer(cfg, conn, stats)
 	defer pacer.reset()
-	var active, pending *association
 	downstream := newExchangeQueue(cfg, stats)
 	bootstrapLimit := bucket{rate: 100, burst: 200}
 	welcomeLimit := bucket{rate: 2, burst: 4}
@@ -79,6 +90,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 		addr    netip.AddrPort
 		kind    byte
 		expires time.Time
+		fec     bool
 	}
 	history := make(map[wire.ID]seenBootstrap)
 	for {
@@ -112,6 +124,8 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 					active, pending = pending, nil
 					delivery.reset()
 					repair.reset()
+					fecSend.reset()
+					fecReceive.reset()
 					a = active
 					stats.Established.Add(1)
 				} else {
@@ -133,7 +147,13 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 						stats.ExchangeReorderedRequests.Add(1)
 					}
 					delivery.push(f.Sequence, f.Payload, now)
-					payload := downstream.pop(now)
+					var payload []byte
+					parity := false
+					if a.fec {
+						payload, parity = fecSend.next(&downstream, now)
+					} else {
+						payload = downstream.pop(now)
+					}
 					backup := false
 					if len(payload) == 0 {
 						payload = repair.pop(now)
@@ -151,7 +171,14 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 					if e == nil && send(conn, p.addr, out, stats) {
 						stats.ExchangeReplies.Add(1)
 						if len(payload) > 0 {
-							stats.Sent.Add(1)
+							if parity {
+								stats.ExchangeFECParity.Add(1)
+							} else {
+								stats.Sent.Add(1)
+								if a.fec && len(payload) >= fecHeader && binary.BigEndian.Uint32(payload) == fecMagic {
+									stats.ExchangeFECData.Add(1)
+								}
+							}
 							if backup {
 								stats.ExchangeRepairSent.Add(1)
 							} else {
@@ -185,7 +212,8 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 				continue
 			}
 			f, err = bootstrap.Open(p.data, now)
-			if err != nil || (f.Kind != wire.Hello && f.Kind != wire.Probe) || f.Sequence != 0 || len(f.Payload) != 0 || len(p.data) < 256 || (f.Kind == wire.Hello && len(p.data) > 512) || f.ID == (wire.ID{}) {
+			fecRequested := cfg.ExchangeFEC && bytes.Equal(f.Payload, fecCapability)
+			if err != nil || (f.Kind != wire.Hello && f.Kind != wire.Probe) || f.Sequence != 0 || (len(f.Payload) != 0 && !fecRequested) || len(p.data) < 256 || (f.Kind == wire.Hello && len(p.data) > 512) || f.ID == (wire.ID{}) {
 				stats.Rejected.Add(1)
 				continue
 			}
@@ -198,7 +226,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 				}
 			}
 			if seen, exists := history[f.ID]; exists {
-				if seen.addr != p.addr || seen.kind != f.Kind || f.Kind == wire.Probe {
+				if seen.addr != p.addr || seen.kind != f.Kind || seen.fec != fecRequested || f.Kind == wire.Probe {
 					stats.Rejected.Add(1)
 					continue
 				}
@@ -207,10 +235,10 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 					stats.Rejected.Add(1)
 					continue
 				}
-				history[f.ID] = seenBootstrap{p.addr, f.Kind, now.Add(155 * time.Second)}
+				history[f.ID] = seenBootstrap{p.addr, f.Kind, now.Add(155 * time.Second), fecRequested}
 			}
 			if f.Kind == wire.Probe {
-				out, e := bootstrap.Seal(wire.Frame{Kind: wire.ProbeReply, ID: f.ID, Timestamp: now.Unix()}, len(p.data))
+				out, e := bootstrap.Seal(wire.Frame{Kind: wire.ProbeReply, ID: f.ID, Timestamp: now.Unix(), Payload: fecBootstrap(fecRequested)}, len(p.data))
 				if e == nil {
 					send(conn, p.addr, out, stats)
 				}
@@ -234,7 +262,12 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 					return err
 				}
 				pending.addr = p.addr
+				pending.fec = fecRequested
 				candidate = pending
+			}
+			if candidate.fec != fecRequested {
+				stats.Rejected.Add(1)
+				continue
 			}
 			if !candidate.lastWelcome.IsZero() && now.Sub(candidate.lastWelcome) < 500*time.Millisecond {
 				continue

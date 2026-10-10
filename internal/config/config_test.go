@@ -142,6 +142,37 @@ func TestExchangeReorderValidation(t *testing.T) {
 	}
 }
 
+func TestFECConfigurationRequiresAdaptiveExchangeAndSeparateRepairChoice(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"client", "server"} {
+		c, err := Load(filepath.Join(dir, mode+".json"), mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.ExchangeFEC = true
+		if c.Validate(mode) == nil {
+			t.Fatal("FEC accepted on raw transport")
+		}
+		c.Transport = "exchange"
+		if mode == "client" {
+			if c.Validate(mode) == nil {
+				t.Fatal("FEC accepted on fixed client")
+			}
+			c.ExchangeMaxPPS = 8000
+		}
+		if err := c.Validate(mode); err != nil {
+			t.Fatal(err)
+		}
+		c.ExchangeRepair = true
+		if c.Validate(mode) == nil {
+			t.Fatal("two recovery encoders accepted together")
+		}
+	}
+}
+
 func TestRawPacingValidation(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bundle")
 	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {

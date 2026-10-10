@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -74,7 +75,8 @@ func ProbeEndpoint(ctx context.Context, cfg config.Config, count int, sizes ...i
 		start := time.Now()
 		size := sizes[i%len(sizes)]
 		sample := ProbeSample{Bytes: size}
-		out, e := codec.Seal(wire.Frame{Kind: wire.Probe, ID: id, Timestamp: start.Unix()}, size)
+		capability := fecBootstrap(cfg.ExchangeFEC)
+		out, e := codec.Seal(wire.Frame{Kind: wire.Probe, ID: id, Timestamp: start.Unix(), Payload: capability}, size)
 		if e != nil {
 			return result, e
 		}
@@ -87,7 +89,7 @@ func ProbeEndpoint(ctx context.Context, cfg config.Config, count int, sizes ...i
 					break
 				}
 				f, openErr := codec.Open(buf[:n], time.Now())
-				if openErr == nil && f.Kind == wire.ProbeReply && f.ID == id && f.Sequence == 0 && len(f.Payload) == 0 && n == len(out) {
+				if openErr == nil && f.Kind == wire.ProbeReply && f.ID == id && f.Sequence == 0 && bytes.Equal(f.Payload, capability) && n == len(out) {
 					result.Received++
 					sample.Received = true
 					sample.RTTMS = float64(time.Since(start)) / float64(time.Millisecond)

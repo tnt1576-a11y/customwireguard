@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
@@ -34,6 +33,10 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	t.Run("reordered-exchange", func(t *testing.T) { testRealWireGuard(t, false, -3, true) })
 	t.Run("repair-exchange", func(t *testing.T) { testRealWireGuard(t, false, -4, true) })
 	t.Run("repair-with-loss", func(t *testing.T) { testRealWireGuard(t, false, -5, true) })
+	t.Run("fec-exchange", func(t *testing.T) { testRealWireGuard(t, false, -6, true) })
+	t.Run("fec-with-loss", func(t *testing.T) { testRealWireGuard(t, false, -7, true) })
+	t.Run("fec-server-legacy-client", func(t *testing.T) { testRealWireGuard(t, false, -8, true) })
+	t.Run("fec-burst-loss", func(t *testing.T) { testRealWireGuard(t, false, -9, true) })
 }
 
 func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
@@ -98,6 +101,20 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 				clientCfg.ExchangeReorderMS, serverCfg.ExchangeReorderMS = 2, 2
 				clientCfg.ExchangeRepair, serverCfg.ExchangeRepair = true, true
 			}
+			if pace == -6 || pace == -7 || pace == -9 {
+				clientCfg.ExchangeFEC, serverCfg.ExchangeFEC = true, true
+				clientCfg.ExchangeReorderMS, serverCfg.ExchangeReorderMS = 2, 2
+			}
+			if pace == -8 {
+				serverCfg.ExchangeFEC = true
+			}
+			if pace == -9 {
+				// This cold-start fixture deliberately enqueues an entire burst
+				// before the first handshake. Isolate recovery from the separate
+				// 60 ms live small-packet deadline and adaptive ramp-up behavior.
+				clientCfg.ExchangePPS = 200
+				clientCfg.ExchangeQueueMS, serverCfg.ExchangeQueueMS = 500, 500
+			}
 		}
 	}
 	if h3 {
@@ -108,9 +125,13 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 	}
 	endpoint := public.LocalAddr().(*net.UDPAddr)
 	var losses *[2]atomic.Uint32
-	if pace == -5 {
+	if pace == -5 || pace == -7 || pace == -9 {
 		key, _ := clientCfg.Secret()
-		endpoint, losses = exchangeNativeLossRelay(t, endpoint, key)
+		dropCount := 1
+		if pace == -9 {
+			dropCount = 4
+		}
+		endpoint, losses = exchangeNativeLossRelay(t, endpoint, key, dropCount)
 		clientCfg.Endpoint = endpoint.String()
 	}
 	remote, e := net.DialUDP("udp4", nil, endpoint)
@@ -158,21 +179,32 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 					src, dst = dst, src
 					from, to = to, from
 				}
-				packet := ipPacket(netip.MustParseAddr(src), netip.MustParseAddr(dst), size)
-				select {
-				case from.Outbound <- packet:
-				case <-time.After(5 * time.Second):
-					t.Fatal("TUN input timeout")
+				count := 1
+				if pace == -9 {
+					count = 16
 				}
-				select {
-				case got := <-to.Inbound:
-					if !bytes.Equal(got, packet) {
-						t.Fatal("WireGuard packet changed")
+				expected := make(map[string]bool, count)
+				for i := 0; i < count; i++ {
+					packet := ipPacket(netip.MustParseAddr(src), netip.MustParseAddr(dst), size)
+					expected[string(packet)] = true
+					select {
+					case from.Outbound <- packet:
+					case <-time.After(5 * time.Second):
+						t.Fatal("TUN input timeout")
 					}
-				case <-time.After(8 * time.Second):
-					t.Fatalf("WireGuard timeout ipv6=%t size=%d reverse=%t stats=%v/%v", ipv6, size, reverse, cs.Snapshot(), ss.Snapshot())
 				}
-				if pace == -4 || pace == -5 {
+				for len(expected) > 0 {
+					select {
+					case got := <-to.Inbound:
+						if !expected[string(got)] {
+							t.Fatal("WireGuard packet changed or duplicated")
+						}
+						delete(expected, string(got))
+					case <-time.After(8 * time.Second):
+						t.Fatalf("WireGuard timeout ipv6=%t size=%d reverse=%t missing=%d stats=%v/%v", ipv6, size, reverse, len(expected), cs.Snapshot(), ss.Snapshot())
+					}
+				}
+				if pace <= -4 {
 					select {
 					case <-to.Inbound:
 						t.Fatal("backup copy escaped native WireGuard replay protection")
@@ -188,15 +220,27 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 	if (pace == -4 || pace == -5) && (cs.ExchangeRepairSent.Load() == 0 || ss.ExchangeRepairSent.Load() == 0) {
 		t.Fatal("backup copies were not exercised in both directions")
 	}
-	if losses != nil && (losses[0].Load() != 1 || losses[1].Load() != 1) {
+	wantLoss := uint32(1)
+	if pace == -9 {
+		wantLoss = 4
+	}
+	if losses != nil && (losses[0].Load() != wantLoss || losses[1].Load() != wantLoss) {
 		t.Fatal("loss injection did not drop native data in both directions")
+	}
+	if pace == -6 || pace == -7 || pace == -9 {
+		if cs.ExchangeFECParity.Load() == 0 || ss.ExchangeFECParity.Load() == 0 {
+			t.Fatal("FEC parity not exercised in both directions")
+		}
+		if (pace == -7 || pace == -9) && (cs.ExchangeFECRecovered.Load() < uint64(wantLoss) || ss.ExchangeFECRecovered.Load() < uint64(wantLoss)) {
+			t.Fatal("real WireGuard loss was not recovered by FEC")
+		}
 	}
 }
 
 // Test-only relay knows this test's random outer key, so it can drop exactly
-// one nonempty native data packet in each direction, without dropping a
+// a bounded number of nonempty native data packets in each direction, without dropping a
 // handshake or keepalive instead. Inner WireGuard keys remain with the devices.
-func exchangeNativeLossRelay(t *testing.T, server *net.UDPAddr, key []byte) (*net.UDPAddr, *[2]atomic.Uint32) {
+func exchangeNativeLossRelay(t *testing.T, server *net.UDPAddr, key []byte, dropCount int) (*net.UDPAddr, *[2]atomic.Uint32) {
 	t.Helper()
 	relay := socket(t)
 	losses := new([2]atomic.Uint32)
@@ -236,7 +280,15 @@ func exchangeNativeLossRelay(t *testing.T, server *net.UDPAddr, key []byte) (*ne
 					}
 				}
 			}
-			if len(payload) > 32 && binary.LittleEndian.Uint32(payload[:4]) == 4 && losses[index].CompareAndSwap(0, 1) {
+			if len(payload) >= fecHeader && binary.BigEndian.Uint32(payload) == fecMagic {
+				if payload[12] == 0 {
+					payload = payload[fecHeader:]
+				} else {
+					payload = nil
+				}
+			}
+			if len(payload) > 32 && binary.LittleEndian.Uint32(payload[:4]) == 4 && losses[index].Load() < uint32(dropCount) {
+				losses[index].Add(1)
 				continue
 			}
 			if destination != nil {

@@ -61,6 +61,13 @@ type Stats struct {
 	ExchangeReorderWaitMaxUS   atomic.Uint64
 	ExchangeRepairSent         atomic.Uint64
 	ExchangeRepairExpired      atomic.Uint64
+	ExchangeFECData            atomic.Uint64
+	ExchangeFECParity          atomic.Uint64
+	ExchangeFECRecovered       atomic.Uint64
+	ExchangeFECExpired         atomic.Uint64
+	ExchangeFECSkipped         atomic.Uint64
+	ExchangeFECInvalid         atomic.Uint64
+	ExchangeFECLate            atomic.Uint64
 	ExchangeSmallQueuePackets  atomic.Uint64
 	ExchangeSmallSent          atomic.Uint64
 	ExchangeSmallDelayMaxUS    atomic.Uint64
@@ -88,6 +95,9 @@ func (s *Stats) Snapshot() map[string]uint64 {
 		"exchange_rtt_us": s.ExchangeRTTUS.Load(), "exchange_late_replies": s.ExchangeLateReplies.Load(),
 		"exchange_reordered_replies": s.ExchangeReorderedReplies.Load(),
 		"exchange_repair_sent":       s.ExchangeRepairSent.Load(), "exchange_repair_expired": s.ExchangeRepairExpired.Load(),
+		"exchange_fec_data": s.ExchangeFECData.Load(), "exchange_fec_parity": s.ExchangeFECParity.Load(),
+		"exchange_fec_recovered": s.ExchangeFECRecovered.Load(), "exchange_fec_expired": s.ExchangeFECExpired.Load(),
+		"exchange_fec_skipped": s.ExchangeFECSkipped.Load(), "exchange_fec_invalid": s.ExchangeFECInvalid.Load(), "exchange_fec_late": s.ExchangeFECLate.Load(),
 		"exchange_reordered_requests": s.ExchangeReorderedRequests.Load(),
 		"exchange_reorder_held":       s.ExchangeReorderHeld.Load(), "exchange_reorder_late": s.ExchangeReorderLate.Load(),
 		"exchange_reorder_forced": s.ExchangeReorderForced.Load(), "exchange_reorder_wait_max_us": s.ExchangeReorderWaitMaxUS.Load(),
@@ -186,6 +196,7 @@ func readersSized(ctx context.Context, stats *Stats, capacities []int, conns ...
 
 type association struct {
 	exchange    bool
+	fec         bool
 	id          wire.ID
 	codec       *wire.Codec
 	token       []byte

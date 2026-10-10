@@ -34,9 +34,19 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 	}
 	channels, cleanup := readersSized(ctx, stats, capacities, local, remote)
 	defer cleanup()
-	delivery := newExchangeReorder(cfg.ExchangeReorderMS, stats, func(data []byte) {
+	fecReceive := &fecReceiver{stats: stats, emit: func(data []byte) {
 		if send(local, wgAddr, data, stats) {
 			stats.Received.Add(1)
+		}
+	}}
+	defer fecReceive.reset()
+	fecSend := &fecSender{stats: stats}
+	defer fecSend.reset()
+	delivery := newExchangeReorder(cfg.ExchangeReorderMS, stats, func(data []byte) {
+		if cfg.ExchangeFEC {
+			fecReceive.push(data, time.Now())
+		} else {
+			fecReceive.emit(data)
 		}
 	})
 	defer delivery.reset()
@@ -87,6 +97,8 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				active = nil
 				delivery.reset()
 				repair.reset()
+				fecSend.reset()
+				fecReceive.reset()
 				poll.Stop()
 				upload.clear()
 				upload.maxAge = time.Second
@@ -105,7 +117,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				id = wire.NewID()
 				attempt = now
 			}
-			out, e := bootstrap.Seal(wire.Frame{Kind: wire.Hello, ID: id, Timestamp: now.Unix()}, wire.RandomBetween(256, 512))
+			out, e := bootstrap.Seal(wire.Frame{Kind: wire.Hello, ID: id, Timestamp: now.Unix(), Payload: fecBootstrap(cfg.ExchangeFEC)}, wire.RandomBetween(256, 512))
 			if e != nil {
 				return e
 			}
@@ -131,7 +143,13 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 					break
 				}
 				at := time.Now()
-				payload := upload.pop(at)
+				var payload []byte
+				parity := false
+				if cfg.ExchangeFEC {
+					payload, parity = fecSend.next(&upload, at)
+				} else {
+					payload = upload.pop(at)
+				}
 				backup := false
 				if len(payload) == 0 {
 					payload = repair.pop(at)
@@ -146,7 +164,14 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 					flights.add(active.send, at, size)
 					stats.ExchangeRequests.Add(1)
 					if len(payload) > 0 {
-						stats.Sent.Add(1)
+						if parity {
+							stats.ExchangeFECParity.Add(1)
+						} else {
+							stats.Sent.Add(1)
+							if cfg.ExchangeFEC && len(payload) >= fecHeader && binary.BigEndian.Uint32(payload) == fecMagic {
+								stats.ExchangeFECData.Add(1)
+							}
+						}
 						if backup {
 							stats.ExchangeRepairSent.Add(1)
 						} else {
