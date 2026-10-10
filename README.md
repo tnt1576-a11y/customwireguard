@@ -29,6 +29,10 @@ these are short-run results, not a capacity or reliability guarantee.
 See [validation](docs/VALIDATION.md), [DPI limits and resilience](docs/RESILIENCE.md),
 and [multi-user and application split-tunnel follow-ups](docs/FOLLOW-UP.md).
 For a separate Windows test PC, see [LAN remote test access](docs/REMOTE-TESTING.md).
+For a fresh Debian 13 server, use the [verified server setup script](docs/SERVER-SETUP.md).
+It installs the current request/reply profile, keeps the native backend private,
+and exports a private Windows client ZIP. Existing installations are not upgraded
+by this command; this installer revision provisions one client.
 Version 0.5.0 adds optional adaptive request scheduling, a larger in-flight
 window, short native-data queue deadlines and sampled diagnostics. It preserves
 the same authenticated version-2 datagrams and one same-sized reply per request.

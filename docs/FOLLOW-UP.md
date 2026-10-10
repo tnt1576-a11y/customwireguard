@@ -28,7 +28,9 @@ handshake deadline and loss-accounting corrections passed controlled regressions
 and a final separate-PC run with 8/8 transfers and 1715/1715 active rapid pings.
 Residual loss remains (0.14725% outer timeouts and one client data expiry in that
 run); this is not a long-term reliability or general latency guarantee. The
-installer, app splitting, Telegram and independent-user features below remain
+fresh Debian installer now passes isolated real-WireGuard/NAT and lifecycle
+tests; see SERVER-SETUP.md for its one-client scope and limitations.
+App splitting, Telegram and independent-user features below remain
 incomplete until their relevant
 source, runtime tests and operator-facing deliverables demonstrate completion.
 
