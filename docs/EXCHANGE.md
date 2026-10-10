@@ -1,4 +1,48 @@
-# Experimental request/reply UDP (0.4.0 through 0.5.3)
+# Experimental request/reply UDP (0.4.0 through 0.5.4)
+
+## Burst recovery and headroom in 0.5.4
+
+The next comparison uses a 9000 requests/s ceiling, a 350 ms bulk deadline on
+both peers, and `exchange_queue_packets: 4096`. This optional field accepts
+256..4096 and requires burst mode; omission retains 2048. Of the configured
+capacity, 128 places remain reserved for packets no larger than 256 bytes.
+Those small packets retain their 60 ms deadline and four-to-one priority.
+The client native input handoff now matches the server's 2048 packets; public
+input remains at 256. This prevents a local native batch from dropping small
+packets before the priority queue sees them. Socket-read timestamps still bound
+their total userspace age.
+
+Cold growth is now at most fourfold per control interval, gated on authenticated
+replies and demand. After any congestion backoff, growth is limited to 10 percent
+(at least 100 requests/s) per interval for that association. The existing
+delay/loss backoff, cooldown, in-flight limits and bounded pacer still apply.
+
+The controller remembers a rate for 30 seconds only after an interval actually
+delivers at least 80 percent of that rate, without expired requests. Local
+backlog of at least 16 packets or an authenticated server backlog hint can
+resume that rate. Resume requires a recent reply, acceptable smoothed RTT,
+no newly expired requests and no cooldown. A congestion backoff erases the
+remembered capacity; a fresh association starts without it. Empty polling and
+isolated small packets do not trigger resume. `exchange_resumes` counts it.
+
+This provides more sending capacity and faster burst recovery while preserving
+small-packet priority. Bulk packets may wait up to 350 ms on the server, compared
+with 200 ms previously. Length is only a heuristic: full-sized latency-sensitive
+datagrams share the bulk queue. Sustained overload can still lose packets.
+At 9000 requests/s, outer UDP payload traffic can approach 102 Mbps EACH way,
+plus IP/link overhead. This is a test ceiling, not a promised Internet speed.
+The encrypted version-2 packet format and one same-sized reply per request are
+unchanged. Older binaries reject the new optional configuration field.
+
+The user can run `Measure-AdaptivePerformance.ps1 -Bundle .\config -HighRate`
+to add a six-second 75 Mbps download target to the existing comparison. This
+keeps each transfer below the endpoint's 64 MiB cap and totals 337.5 MB of
+application payload plus carrier overhead. Without `-HighRate`, the original
+eight transfers and 281.25 MB remain unchanged. The assistant runs only local
+mock-peer validation; the user runs the real Windows tunnel test.
+
+Per-application split tunneling is a separate recorded
+[follow-up requirement](FOLLOW-UP.md).
 
 ## Input bursts in 0.5.3
 

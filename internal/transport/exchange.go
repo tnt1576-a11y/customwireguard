@@ -34,6 +34,9 @@ func newExchangeQueue(cfg config.Config, stats *Stats) exchangeQueue {
 		q.capacity = 2048
 	}
 	q.burstAge = time.Duration(cfg.ExchangeBurstMS) * time.Millisecond
+	if cfg.ExchangeQueuePackets > 0 {
+		q.capacity = cfg.ExchangeQueuePackets
+	}
 	return q
 }
 

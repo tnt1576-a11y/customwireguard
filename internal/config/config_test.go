@@ -114,6 +114,34 @@ func TestRawPacingValidation(t *testing.T) {
 	}
 }
 
+func TestExchangeQueueCapacityValidation(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(filepath.Join(dir, "client.json"), "client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Transport, c.ExchangeQueueMS, c.ExchangeBurstMS = "exchange", 60, 350
+	for _, size := range []int{0, 256, 2048, 4096} {
+		c.ExchangeQueuePackets = size
+		if err := c.Validate("client"); err != nil {
+			t.Fatal(size, err)
+		}
+	}
+	for _, size := range []int{-1, 255, 4097} {
+		c.ExchangeQueuePackets = size
+		if c.Validate("client") == nil {
+			t.Fatal("unbounded capacity", size)
+		}
+	}
+	c.ExchangeQueuePackets, c.ExchangeBurstMS = 4096, 0
+	if c.Validate("client") == nil {
+		t.Fatal("capacity accepted without burst mode")
+	}
+}
+
 func TestExchangeConfigValidation(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bundle")
 	if e := Initialize(dir, "192.0.2.10:443", "balanced"); e != nil {

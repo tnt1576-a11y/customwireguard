@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 # User-run only. Transfers and pings go through the real CWG tunnel.
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Bundle)
+param([Parameter(Mandatory)][string]$Bundle,[switch]$HighRate)
 $ErrorActionPreference='Stop'
 $bundlePath=(Resolve-Path -LiteralPath $Bundle).Path
 if(Test-Path -LiteralPath (Join-Path $bundlePath 'client-state.json')){throw 'Stop CWG before starting this measurement.'}
@@ -30,6 +30,7 @@ function Payload-Hash([long]$Count){
 }
 function Start-Transfer([string]$Phase,[string]$Direction,[int]$Mbps,[switch]$Smooth){
     $bps=[long]$Mbps*125000;$count=$bps*10
+    if($Mbps -eq 75){$count=$bps*6} # Remain below the endpoint's 64 MiB bound.
     $body=Join-Path $directory ($Phase+'-'+$Direction+'.body');$ownedFiles.Add($body)
     $stdout=Join-Path $directory ($Phase+'-'+$Direction+'.json');$stderr=Join-Path $directory ($Phase+'-'+$Direction+'.stderr.log')
     $expected=Payload-Hash $count
@@ -90,11 +91,13 @@ function Measure-Phase([string]$Name,[object[]]$Transfers,[int]$IdleSamples=0){
 $started=$false;$pinger=$null
 try{
     Write-Report ('Adaptive CWG user-run performance test UTC: '+[DateTime]::UtcNow.ToString('o'))
-    Write-Report 'Close videos/downloads and disconnect other VPNs. Allow 3-5 minutes. The test transfers 281.25 MB of synthetic payload; UDP padding and polling add further traffic.'
+    $payloadMB=if($HighRate){337.5}else{281.25}
+    Write-Report ('Close videos/downloads and disconnect other VPNs. Allow 3-5 minutes. The test transfers '+$payloadMB+' MB of synthetic payload; UDP padding and polling add further traffic.')
     & (Join-Path $PSScriptRoot 'Start-Client.ps1') -Bundle $bundlePath -Mode Full -TracePackets
     $started=$true;$pinger=[Net.NetworkInformation.Ping]::new()
     Measure-Phase 'idle-before' @() 20
     foreach($rate in @(25,50)){$name='download-'+$rate;$transfer=Start-Transfer $name 'download' $rate;Measure-Phase $name @($transfer)}
+    if($HighRate){$transfer=Start-Transfer 'download-75' 'download' 75;Measure-Phase 'download-75' @($transfer)}
     $a=Start-Transfer 'parallel-25-a' 'download' 25;$b=Start-Transfer 'parallel-25-b' 'download' 25;Measure-Phase 'parallel-download-50' @($a,$b)
     $transfer=Start-Transfer 'upload-bursty-25' 'upload' 25;Measure-Phase 'upload-bursty-25' @($transfer)
     $transfer=Start-Transfer 'upload-smooth-25' 'upload' 25 -Smooth;Measure-Phase 'upload-smooth-25' @($transfer)

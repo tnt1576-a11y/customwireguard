@@ -95,7 +95,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             parsed=urlsplit(self.path);q=parse_qs(parsed.query,strict_parsing=True)
             if parsed.path!='/download' or set(q)!={'bytes','bps'} or any(len(v)!=1 for v in q.values()):raise ValueError()
             count=int(q['bytes'][0]);rate=int(q['bps'][0])
-            if not 1<=count<=MAX_BYTES or rate not in (1250000,3125000,6250000):raise ValueError()
+            if not 1<=count<=MAX_BYTES or rate not in (1250000,3125000,6250000,9375000):raise ValueError()
         except ValueError:self.send_error(400);return
         with self.track('download',count,rate) as progress:
             try:

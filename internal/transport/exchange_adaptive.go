@@ -25,7 +25,14 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 		return err
 	}
 	wgAddr := netip.MustParseAddrPort(cfg.WireGuard)
-	channels, cleanup := readers(ctx, stats, local, remote)
+	var capacities []int
+	if cfg.ExchangeBurstMS > 0 {
+		// Match the server's native input handoff. At higher rates a native
+		// batch can exceed 256 packets before the event loop drains it; losing
+		// here would discard small packets before priority can be applied.
+		capacities = []int{2048, 256}
+	}
+	channels, cleanup := readersSized(ctx, stats, capacities, local, remote)
 	defer cleanup()
 	if cfg.ExchangeQueueMS == 0 {
 		cfg.ExchangeQueueMS = 60
@@ -138,6 +145,9 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			}
 			now := time.Now()
 			upload.push(p.data, p.at)
+			if upload.length() >= 16 {
+				control.resume(now)
+			}
 			busy(now)
 		case p := <-channels[1]:
 			now := time.Now()
@@ -173,7 +183,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			stats.ExchangePending.Store(uint64(flights.count))
 			stats.ExchangeReplies.Add(1)
 			useful := len(f.Payload) > 9
-			control.reply(now.Sub(flight.at), useful, f.Payload[8] != 0)
+			control.reply(now, now.Sub(flight.at), useful, f.Payload[8] != 0)
 			if useful {
 				if send(local, wgAddr, f.Payload[9:], stats) {
 					stats.Received.Add(1)
@@ -183,6 +193,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				stats.ExchangeEmpty.Add(1)
 			}
 			if f.Payload[8] != 0 {
+				control.resume(now)
 				busy(now)
 			}
 		}

@@ -678,6 +678,58 @@ loss within the path. The client counted 83 expired outer requests and two
 rate backoffs without reconnecting. This run did not reproduce a complete
 5-10 second connection cutoff, but does not establish long-term DPI resistance.
 
+## 0.5.4 burst recovery and higher-rate trial
+
+The release passed go mod verify, go vet and the full Go suite (transport tests
+55.635 seconds). New deterministic checks cover recent delivery-based resume,
+expiry of remembered capacity, stale replies, congestion invalidation and
+conservative recovery, plus a bounded 3000-packet bulk burst alongside small
+traffic. PowerShell 5.1 and 7 offline fixtures cover normal/high-rate transfers,
+transfer failure and partial startup cleanup. No actual Windows tunnel was
+started by the assistant.
+
+Exact Windows and Linux executables were tested with temporary keys, localhost
+mock peers and 45 ms added one-way delay. Six 3000-packet bursts followed an idle
+period. All 18000 bulk packets in each direction arrived on both platforms, as
+did all small packets sent alongside them. Windows small-packet one-way p95
+was 47.53/48.26 ms upload/download; Linux was 47.32/47.32 ms. The Linux 0.5.3
+comparison lost 31.01 percent upload and 55.64 percent download of that same
+offered bulk pattern; its small-packet p95 was 47.09/47.05 ms. These are synthetic
+carrier measurements, not Internet ping or native WireGuard speed measurements.
+
+Five-second simultaneous 25/50/75 Mbps offered-load stages, with small traffic
+alongside, delivered every payload and small packet on both platforms. The
+final 75 Mbps stage reported 74.98 Mbps each way on Windows and 74.97 on Linux;
+the benchmark divides delivered bytes by the send interval and allows a short
+drain afterward, so these numbers do not establish sustained capacity. Small
+one-way p95 at 75 Mbps was 47.42/48.28 ms on Windows and 52.40/52.97 ms on Linux.
+Large packets still queued: Linux bulk p95 was 76.83/74.24 ms at 75 Mbps, and
+the initial cold 25 Mbps stage had bulk p95 173.63/218.47 ms. Priority preserves
+small-packet responsiveness, not uniformly low latency for every packet size.
+
+An earlier Linux candidate exposed 148 client native-input drops, including
+one small packet, at 75 Mbps. Matching the client native handoff to the server's
+2048 bound corrected that loss in the final exact-artifact comparison. Packet
+age still starts at socket read and includes time in the handoff. The encrypted
+format, public input bound, native MTU and small-packet deadline are unchanged.
+
+A separate candidate comparison imposed a 40 Mbps outer link with a bounded
+20 ms queue. Both versions lost substantial bulk data under overload. Candidate
+small-packet p95 was 65.85/51.63 ms versus 69.10/66.42 ms for 0.5.3. Congestion
+cannot be removed by enlarging queues; the trial retains backoff and pacing.
+Exact-artifact smoke tests passed authentication, integrity, replay rejection,
+unauthenticated silence and trace correlation. The bounded diagnostic endpoint
+also passed localhost integrity and invalid/oversize request checks, including
+the new 75 Mbps rate. Linux ARM64 was cross-compiled, not runtime tested.
+
+The next USER-RUN test is Measure-AdaptivePerformance.ps1 with -HighRate. It
+repeats the earlier transfers and adds a bounded 75 Mbps download, totaling
+337.5 MB plus carrier overhead. Compare loaded ping with idle and with 0.5.3,
+as well as per-phase queue expirations/full drops, reader/kernel drops and TCP
+retransmissions. Real-network burst loss, speed and latency remain unverified
+for this version until that test. Per-application split tunneling is recorded
+separately in FOLLOW-UP.md; no WireSock policy or adapter changes were made.
+
 ## Still not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,

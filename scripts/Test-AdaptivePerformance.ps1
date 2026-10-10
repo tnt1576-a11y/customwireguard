@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $fixture=Join-Path $root ('test-output\adaptive-helper-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixture | Out-Null
-$source=(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Measure-AdaptivePerformance.ps1') -Raw).Replace('#Requires -RunAsAdministrator','# Offline fixture').Replace('[Net.NetworkInformation.Ping]::new()','(New-FixturePing)').Replace('$count=$bps*10','$count=256')
+$source=(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Measure-AdaptivePerformance.ps1') -Raw).Replace('#Requires -RunAsAdministrator','# Offline fixture').Replace('[Net.NetworkInformation.Ping]::new()','(New-FixturePing)').Replace('$count=$bps*10','$count=256').Replace('$count=$bps*6','$count=256')
 Set-Content -LiteralPath (Join-Path $fixture 'Measure-AdaptivePerformance.ps1') -Value $source -Encoding UTF8
 Set-Content -LiteralPath (Join-Path $fixture 'Start-Client.ps1') -Value @'
 param($Bundle,$Mode,[switch]$TracePackets)
@@ -50,21 +50,23 @@ function Start-Process {
     $p|Add-Member ScriptMethod Dispose {}
     return $p
 }
-foreach($case in @('success','curl-failure','partial-start')){
+foreach($case in @('success','high-rate','curl-failure','partial-start')){
     $global:AdaptiveCase=$case;$global:AdaptiveStarts=0;$global:AdaptiveStops=0;$global:AdaptivePingDisposed=$false
     $bundle=Join-Path $fixture $case;New-Item -ItemType Directory -Path $bundle|Out-Null
     '{"transport":"exchange","exchange_max_pps":6000,"exchange_burst_ms":200}'|Set-Content -LiteralPath (Join-Path $bundle 'client.json')
     $failed=$false
-    try{& (Join-Path $fixture 'Measure-AdaptivePerformance.ps1') -Bundle $bundle 6>$null}catch{if($case -ne 'partial-start'){throw};$failed=$true}
+    try{& (Join-Path $fixture 'Measure-AdaptivePerformance.ps1') -Bundle $bundle -HighRate:($case -eq 'high-rate') 6>$null}catch{if($case -ne 'partial-start'){throw};$failed=$true}
     if($failed -ne ($case -eq 'partial-start') -or $global:AdaptiveStarts -ne 1 -or $global:AdaptiveStops -ne 1){throw ('Cleanup failed: '+$case)}
     if($case -ne 'partial-start'){
         if(-not $global:AdaptivePingDisposed){throw 'Ping object leaked'}
         $directory=Get-ChildItem -LiteralPath $bundle -Directory|Select-Object -First 1
         $report=Get-Content -LiteralPath (Join-Path $directory.FullName 'report.txt') -Raw
-        $expected=if($case -eq 'success'){':true'}else{':false'}
-        if([regex]::Matches($report,'"complete_and_verified"'+$expected).Count -ne 8){throw ('Transfer result wrong: '+$case)}
+        $expected=if($case -in @('success','high-rate')){':true'}else{':false'}
+        $count=if($case -eq 'high-rate'){9}else{8}
+        if([regex]::Matches($report,'"complete_and_verified"'+$expected).Count -ne $count){throw ('Transfer result wrong: '+$case)}
+        if(($case -eq 'high-rate') -ne $report.Contains('"target_mbps":75')){throw 'High-rate phase selection failed'}
         if(@(Get-ChildItem -LiteralPath $directory.FullName -File|Where-Object Extension -in '.body','.bin').Count){throw 'Synthetic files left behind'}
     }
     Write-Host ('PASS: '+$case)
 }
-Write-Host 'Three offline adaptive performance helper cases passed.'
+Write-Host 'Four offline adaptive performance helper cases passed.'

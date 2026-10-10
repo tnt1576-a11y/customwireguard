@@ -13,7 +13,7 @@ func TestAdaptiveControllerGrowthBackoffAndIdle(t *testing.T) {
 	c := newExchangeControl(200, 6000, now, s)
 	for i := 0; i < 6; i++ {
 		for n := 0; n < 32; n++ {
-			c.reply(90*time.Millisecond, true, true)
+			c.reply(now, 90*time.Millisecond, true, true)
 		}
 		now = now.Add(100 * time.Millisecond)
 		c.update(now, false)
@@ -22,7 +22,7 @@ func TestAdaptiveControllerGrowthBackoffAndIdle(t *testing.T) {
 		t.Fatal("did not fill long-RTT pipeline", c.rate, c.window())
 	}
 	for n := 0; n < 32; n++ {
-		c.reply(130*time.Millisecond, true, true)
+		c.reply(now, 130*time.Millisecond, true, true)
 	}
 	now = now.Add(150 * time.Millisecond)
 	c.update(now, false)
@@ -31,7 +31,7 @@ func TestAdaptiveControllerGrowthBackoffAndIdle(t *testing.T) {
 	}
 	old := c.rate
 	for n := 0; n < 32; n++ {
-		c.reply(90*time.Millisecond, true, true)
+		c.reply(now, 90*time.Millisecond, true, true)
 	}
 	now = now.Add(150 * time.Millisecond)
 	c.update(now, false)
@@ -41,7 +41,7 @@ func TestAdaptiveControllerGrowthBackoffAndIdle(t *testing.T) {
 	now = now.Add(time.Second)
 	c.lost = 10
 	for n := 0; n < 90; n++ {
-		c.reply(90*time.Millisecond, true, false)
+		c.reply(now, 90*time.Millisecond, true, false)
 	}
 	c.update(now, false)
 	if c.rate >= old {
@@ -49,7 +49,7 @@ func TestAdaptiveControllerGrowthBackoffAndIdle(t *testing.T) {
 	}
 	for i := 0; i < 60; i++ {
 		for n := 0; n < 32; n++ {
-			c.reply(90*time.Millisecond, false, false)
+			c.reply(now, 90*time.Millisecond, false, false)
 		}
 		now = now.Add(time.Second)
 		c.update(now, false)
@@ -71,6 +71,95 @@ func TestAdaptiveDoesNotGrowWithoutReplies(t *testing.T) {
 	}
 	if c.rate != 200 {
 		t.Fatal("unacknowledged traffic increased sending rate")
+	}
+}
+
+func TestAdaptiveResumesOnlyRecentDeliveredCapacity(t *testing.T) {
+	now := time.Unix(1000, 0)
+	s := new(Stats)
+	c := newExchangeControl(200, 9000, now, s)
+	// Fill each 100 ms interval with actual replies at its current rate.
+	for i := 0; i < 8; i++ {
+		now = now.Add(100 * time.Millisecond)
+		for n := 0; n < c.rate/10; n++ {
+			c.reply(now, 90*time.Millisecond, true, true)
+		}
+		c.update(now, true)
+	}
+	if c.provenRate != 9000 {
+		t.Fatal("capacity not learned", c.provenRate)
+	}
+	// An application pause lets the rate decay, not the recent delivery memory.
+	for i := 0; i < 30; i++ {
+		now = now.Add(100 * time.Millisecond)
+		for n := 0; n < 20; n++ {
+			c.reply(now, 90*time.Millisecond, false, false)
+		}
+		c.update(now, false)
+	}
+	if c.rate >= 9000 {
+		t.Fatal("idle traffic did not decay")
+	}
+	c.resume(now)
+	if c.rate != 9000 || s.ExchangeResumes.Load() != 1 {
+		t.Fatal("fresh burst did not resume", c.rate)
+	}
+	for _, condition := range []string{"expired", "stale-reply", "loss", "delay", "cooldown"} {
+		copy := *c
+		copy.rate = 200
+		switch condition {
+		case "expired":
+			copy.provenUntil = now
+		case "stale-reply":
+			copy.lastReply = now.Add(-time.Second)
+		case "loss":
+			copy.lost = 1
+		case "delay":
+			copy.srtt = 130 * time.Millisecond
+		case "cooldown":
+			copy.cooldown = now.Add(time.Second)
+		}
+		copy.resume(now)
+		if copy.rate != 200 {
+			t.Fatal("unsafe resume", condition)
+		}
+	}
+	c.lost = 50
+	now = now.Add(100 * time.Millisecond)
+	for n := 0; n < 100; n++ {
+		c.reply(now, 90*time.Millisecond, true, true)
+	}
+	c.update(now, true)
+	if c.provenRate != 0 {
+		t.Fatal("backoff retained old capacity")
+	}
+	rate := c.rate
+	c.resume(now.Add(time.Second))
+	if c.rate != rate {
+		t.Fatal("old capacity bypassed congestion backoff")
+	}
+	now = now.Add(time.Second)
+	for n := 0; n < 1000; n++ {
+		c.reply(now, 90*time.Millisecond, true, true)
+	}
+	c.update(now, true)
+	if c.rate > rate+max(100, rate/10) {
+		t.Fatal("recovery repeated cold-start jump")
+	}
+}
+
+func TestAdaptiveGrowthDoesNotInventProvenCapacity(t *testing.T) {
+	now := time.Unix(1000, 0)
+	c := newExchangeControl(200, 9000, now, new(Stats))
+	for i := 0; i < 8; i++ {
+		now = now.Add(100 * time.Millisecond)
+		for n := 0; n < 8; n++ {
+			c.reply(now, 90*time.Millisecond, true, true)
+		}
+		c.update(now, true)
+	}
+	if c.provenRate != 0 {
+		t.Fatal("sparse acknowledgments proved a high rate")
 	}
 }
 

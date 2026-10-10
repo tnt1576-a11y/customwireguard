@@ -16,6 +16,23 @@ type exchangeControl struct {
 	acks, useful, lost     int
 	backlog                bool
 	quiet                  int
+	provenRate             int
+	provenUntil            time.Time
+	lastReply              time.Time
+	recovering             bool
+}
+
+// Resume only capacity recently sustained by authenticated deliveries. This
+// avoids repeating slow start for each application burst, while retaining the
+// normal pacer and congestion response. No traffic is sent solely to keep this
+// memory alive, and a fresh association starts with no remembered capacity.
+func (c *exchangeControl) resume(now time.Time) {
+	if c.provenRate > c.rate && now.Before(c.provenUntil) && !now.Before(c.cooldown) && c.lost == 0 && !c.lastReply.IsZero() && now.Sub(c.lastReply) <= max(500*time.Millisecond, 3*c.srtt) && c.srtt <= c.minRTT+25*time.Millisecond {
+		c.rate = min(c.ceiling, c.provenRate)
+		c.quiet = 0
+		c.stats.ExchangeRateIncreases.Add(1)
+		c.stats.ExchangeResumes.Add(1)
+	}
 }
 
 func newExchangeControl(base, ceiling int, now time.Time, stats *Stats) *exchangeControl {
@@ -25,10 +42,11 @@ func newExchangeControl(base, ceiling int, now time.Time, stats *Stats) *exchang
 	return &exchangeControl{base: base, ceiling: ceiling, rate: base, epoch: now, stats: stats}
 }
 
-func (c *exchangeControl) reply(rtt time.Duration, useful, more bool) {
+func (c *exchangeControl) reply(now time.Time, rtt time.Duration, useful, more bool) {
 	if rtt <= 0 {
 		return
 	}
+	c.lastReply = now
 	if c.srtt == 0 {
 		c.srtt = rtt
 	} else {
@@ -54,17 +72,35 @@ func (c *exchangeControl) update(now time.Time, uploadPending bool) {
 		return
 	}
 	old := c.rate
+	elapsed := now.Sub(c.epoch)
 	total := c.acks + c.lost
 	loss := total >= 16 && c.lost*100 > total*2
 	delay := c.acks >= 16 && c.epochMin > c.minRTT+25*time.Millisecond
 	if loss || delay {
 		c.rate = max(c.base, c.rate*7/10)
+		// Old capacity must never bypass a backoff after the path changes.
+		c.provenRate = 0
+		c.provenUntil = time.Time{}
+		c.recovering = true
 		c.cooldown = now.Add(max(200*time.Millisecond, 2*c.srtt))
 		c.quiet = 0
 		c.stats.ExchangeBackoffs.Add(1)
 	} else if !now.Before(c.cooldown) && c.acks >= 8 && (uploadPending || c.backlog || c.useful*4 >= c.acks*3) {
-		// Slow start is permitted only while acknowledgments show actual delivery.
-		c.rate = min(c.ceiling, c.rate*2)
+		// A growth decision alone is not proof the higher rate was delivered.
+		if c.lost == 0 && float64(c.acks) >= float64(c.rate)*elapsed.Seconds()*.8 && c.rate >= c.provenRate {
+			c.provenRate = c.rate
+			c.provenUntil = now.Add(30 * time.Second)
+		}
+		// A cold burst cannot survive many RTT-sized doubling intervals within
+		// the bounded bulk deadline. Grow by at most four per interval, only
+		// with authenticated delivery and demand, retaining delay/loss backoff.
+		growth := c.rate * 4
+		if c.recovering {
+			// Once this association found congestion, probe conservatively
+			// instead of repeating cold-start jumps into the same bottleneck.
+			growth = c.rate + max(100, c.rate/10)
+		}
+		c.rate = min(c.ceiling, growth)
 		c.quiet = 0
 	} else if !uploadPending && !c.backlog && c.useful*3 < c.acks {
 		c.quiet++

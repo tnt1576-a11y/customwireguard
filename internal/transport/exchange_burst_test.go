@@ -118,3 +118,43 @@ func TestExchangeLargerUploadBurst(t *testing.T) {
 		}
 	}
 }
+
+func TestExchangeThreeThousandPacketBurstWithSmallTraffic(t *testing.T) {
+	now := time.Unix(1000, 0)
+	s := new(Stats)
+	q := newExchangeQueue(config.Config{ExchangeQueueMS: 60, ExchangeBurstMS: 350, ExchangeQueuePackets: 4096}, s)
+	for n := 0; n < 3000; n++ {
+		q.push(make([]byte, 1120), now)
+	}
+	bulk, small := 0, 0
+	for ms := 0; ms < 350; ms++ {
+		at := now.Add(time.Duration(ms) * time.Millisecond)
+		if ms%10 == 0 {
+			q.push(make([]byte, 80), at)
+		}
+		for n := 0; n < 9; n++ {
+			switch len(q.pop(at)) {
+			case 1120:
+				bulk++
+			case 80:
+				small++
+			}
+		}
+	}
+	if bulk != 3000 || small != 35 || s.ExchangeQueueDropped.Load() != 0 || s.ExchangeSmallDelayMaxUS.Load() > 1000 {
+		t.Fatal("burst or small priority regressed", bulk, small, s.Snapshot())
+	}
+	for n := 0; n < 5000; n++ {
+		q.push(make([]byte, 1120), now)
+	}
+	for n := 0; n < 200; n++ {
+		q.push(make([]byte, 80), now)
+	}
+	if q.length() != 4096 || len(q.small) != 128 {
+		t.Fatal("capacity or small reservation unbounded")
+	}
+	q.expire(now.Add(351 * time.Millisecond))
+	if q.length() != 0 {
+		t.Fatal("deadline no longer bounds overload")
+	}
+}

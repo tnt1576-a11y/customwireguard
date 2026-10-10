@@ -5,6 +5,11 @@ carrier**. It carries complete native WireGuard datagrams and remains UDP-only;
 there is no TCP fallback. Each authenticated request permits one same-sized
 response; the server queues return traffic until the client requests it.
 See [request/reply mode and its bandwidth cost](docs/EXCHANGE.md).
+Version 0.5.4 adds recent-delivery-based burst recovery, configurable bounded
+queue capacity and a user-run 75 Mbps target test. The next trial uses a
+9000 requests/s ceiling with small-packet priority; actual network throughput
+and latency must be measured. Per-application split tunneling is tracked in
+[follow-up requirements](docs/FOLLOW-UP.md).
 Version 0.5.0 adds optional adaptive request scheduling, a larger in-flight
 window, short native-data queue deadlines and sampled diagnostics. It preserves
 the same authenticated version-2 datagrams and one same-sized reply per request.
