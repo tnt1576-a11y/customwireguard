@@ -32,6 +32,8 @@ type Config struct {
 	ExchangeQueueMS      int    `json:"exchange_queue_ms,omitempty"`
 	ExchangeBurstMS      int    `json:"exchange_burst_ms,omitempty"`
 	ExchangeQueuePackets int    `json:"exchange_queue_packets,omitempty"`
+	ExchangeReorderMS    int    `json:"exchange_reorder_ms,omitempty"`
+	ExchangeRepair       bool   `json:"exchange_repair,omitempty"`
 }
 
 func Load(path string, mode string) (Config, error) {
@@ -106,6 +108,12 @@ func (c Config) Validate(mode string) error {
 	}
 	if c.ExchangeQueuePackets != 0 && (c.ExchangeBurstMS == 0 || c.ExchangeQueuePackets < 256 || c.ExchangeQueuePackets > 4096) {
 		return errors.New("exchange_queue_packets requires exchange_burst_ms and must be 256..4096")
+	}
+	if c.ExchangeReorderMS != 0 && (c.Transport != "exchange" || c.ExchangeReorderMS < 1 || c.ExchangeReorderMS > 5 || (mode == "client" && c.ExchangeMaxPPS == 0)) {
+		return errors.New("exchange_reorder_ms requires exchange (adaptive on client) and must be 1..5, or zero to disable")
+	}
+	if c.ExchangeRepair && (c.Transport != "exchange" || (mode == "client" && c.ExchangeMaxPPS == 0)) {
+		return errors.New("exchange_repair requires exchange transport and an adaptive client")
 	}
 	if c.PaceKbps != 0 && (c.PaceKbps < 128 || c.PaceKbps > 100000) {
 		return errors.New("pace_kbps must be zero or 128..100000")

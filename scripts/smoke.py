@@ -35,7 +35,11 @@ def main():
     interface_args = ['-interface-index', str(int(sys.argv[2]))] if len(sys.argv) > 2 else []
     pace = int(sys.argv[3]) if len(sys.argv) > 3 else 0
     transport = sys.argv[4] if len(sys.argv) > 4 else 'raw'
+    reorder_ms = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+    repair = bool(int(sys.argv[6])) if len(sys.argv) > 6 else False
     assert transport in ('raw', 'exchange') and not (pace and transport == 'exchange')
+    assert 0 <= reorder_ms <= 5 and (not reorder_ms or transport == 'exchange')
+    assert not repair or transport == 'exchange'
     sizes = (32, 148, 1280, 1312 if transport == 'exchange' else 1364)
     processes = []
     sockets = []
@@ -56,6 +60,13 @@ def main():
                 cfg['transport'] = transport
                 if transport == 'exchange':
                     cfg['exchange_pps'] = 100
+                    if reorder_ms or repair:
+                        cfg['exchange_reorder_ms'] = reorder_ms
+                        cfg['exchange_repair'] = repair
+                        # Preserve the fixed-rate smoke's 500 ms burst budget
+                        # while exercising the adaptive-only client receiver.
+                        cfg['exchange_queue_ms'] = 500
+                        if name == 'client': cfg['exchange_max_pps'] = 9000
                 if pace:
                     cfg['pace_kbps'], cfg['pace_queue_ms'] = pace, 150
                 (bundle / f'{name}.json').write_text(json.dumps(cfg))
@@ -106,9 +117,33 @@ def main():
                             first = now
                         assert got == message, f'{direction} burst changed, reordered or lost data'
                     elapsed = time.monotonic() - first
-                    minimum = (len(messages)-1) * (1200+48) * 8 / (pace*1000) if pace else (len(messages)-1)/100
+                    ceiling = 9000 if reorder_ms or repair else 100
+                    minimum = (len(messages)-1) * (1200+48) * 8 / (pace*1000) if pace else (len(messages)-1)/ceiling
                     assert elapsed >= minimum * 0.75, f'{direction} pacing not applied: {elapsed}'
                     burst_elapsed[direction] = round(elapsed, 4)
+            repair_checked = False
+            if repair:
+                # Synthetic native data header exercises the exact executable's
+                # repair path. This UDP fixture has no WireGuard replay filter,
+                # so it must observe exactly two identical native datagrams.
+                # Real WireGuard duplicate rejection is covered by Go tests.
+                for direction, source, target, receiver in [
+                    ('upload', wg, (target_host, int(target_port)), backend),
+                    ('download', backend, peer, wg),
+                ]:
+                    packet = b'\x04\x00\x00\x00' + secrets.token_bytes(1084)
+                    source.sendto(packet, target)
+                    assert receiver.recvfrom(65535)[0] == packet, f'{direction} repair original missing'
+                    assert receiver.recvfrom(65535)[0] == packet, f'{direction} backup missing or changed'
+                    receiver.settimeout(.1)
+                    try:
+                        receiver.recvfrom(65535)
+                        raise AssertionError(f'{direction} emitted more than one backup')
+                    except socket.timeout:
+                        pass
+                    finally:
+                        receiver.settimeout(5)
+                repair_checked = True
             attacker = udp()
             sockets.append(attacker)
             server_host, server_port = server_address.rsplit(':', 1)
@@ -147,6 +182,7 @@ def main():
                               'probe': result, 'unauthenticated_silence': True,
                               'live_session_preserved': True, 'socket_traces_correlated': True,
                               'pace_kbps': pace, 'burst_seconds': burst_elapsed,
+                              'repair_copies_verified': repair_checked,
                               'os_routes_changed': False}, indent=2))
             failed = False
         finally:

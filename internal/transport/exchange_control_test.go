@@ -274,7 +274,7 @@ func TestAdaptiveGrowthDoesNotInventProvenCapacity(t *testing.T) {
 }
 
 func TestAdaptivePacerRateAndStall(t *testing.T) {
-	for _, rate := range []int{4, 200, 1000, 6000, 12000} {
+	for _, rate := range []int{4, 200, 1000, 6000, 7500, 9000, 12000} {
 		p := exchangePacer{}
 		now := time.Unix(1000, 0)
 		sent := 0
@@ -285,7 +285,7 @@ func TestAdaptivePacerRateAndStall(t *testing.T) {
 		if sent < rate-2 || sent > rate+2 {
 			t.Fatalf("rate%d sent%d", rate, sent)
 		}
-		if n := p.ready(now.Add(time.Hour), rate); n > 32 {
+		if n := p.ready(now.Add(time.Hour), rate); n > min(32, max(1, (rate+499)/500)) {
 			t.Fatal("stall catch-up burst", n)
 		}
 	}

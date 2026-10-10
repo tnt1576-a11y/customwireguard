@@ -5,11 +5,21 @@ carrier**. It carries complete native WireGuard datagrams and remains UDP-only;
 there is no TCP fallback. Each authenticated request permits one same-sized
 response; the server queues return traffic until the client requests it.
 See [request/reply mode and its bandwidth cost](docs/EXCHANGE.md).
+Version 0.5.6 adds optional short reordering protection and one delayed backup
+copy of native WireGuard data in otherwise empty scheduled exchange slots.
+Original traffic takes priority; copies expire quickly and the packet-rate
+ceiling is unchanged by the feature. The current stability profile uses a
+8000 requests/s ceiling, a 2 ms reorder target and repair on both endpoints.
+Controlled tests recover deliberately dropped data in both directions. Live
+Windows tests still show outer reply timeouts: this reduces their possible
+application impact, rather than establishing a loss-free path. See the
+[stability experiment results](docs/VALIDATION.md#056-stability-experiments-2026-10-10).
+
 Version 0.5.5 prevents old timeouts after a delay-triggered rate reduction from
 counting the same disturbance again. New counters distinguish loss and delay
-backoffs. Loss-only congestion retains its conservative response. The 9000
-requests/s ceiling, bounded queues and small-packet priority
-remain unchanged. The 0.5.4 user test delivered 66.6 Mbps with overall ping
+backoffs. Loss-only congestion retains its conservative response. That release
+used a 9000 requests/s ceiling with bounded queues and small-packet priority.
+The 0.5.4 user test delivered 66.6 Mbps with overall ping
 median/p95 of 91/100 ms, but retained some burst expirations and TCP retransmits;
 these are short-run results, not a capacity or reliability guarantee.
 See [validation](docs/VALIDATION.md), [DPI limits and resilience](docs/RESILIENCE.md),

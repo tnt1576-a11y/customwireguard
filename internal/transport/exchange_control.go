@@ -176,8 +176,10 @@ func (p *exchangePacer) ready(now time.Time, rate int) int {
 	p.rate = rate
 	limit := min(32, max(1, int(math.Ceil(float64(rate)*.002))))
 	p.tokens = min(float64(limit), p.tokens)
-	n := int(p.tokens)
-	p.tokens -= float64(n)
+	// Avoid losing a whole credit to floating-point roundoff at exact timer
+	// boundaries (for example ten 100 us steps at 1000 requests/s).
+	n := int(p.tokens + 1e-9)
+	p.tokens = max(0, p.tokens-float64(n))
 	return n
 }
 func (p *exchangePacer) wait() time.Duration {

@@ -890,3 +890,135 @@ The eight offline cleanup fixtures also passed in Windows PowerShell 5.1 and 7.
 No CWG connection, adapter or route change was performed on the controller PC.
 These short tests establish remote test readiness, not future DPI resistance or
 multi-user capacity. Core protocol/binaries and server deployment were unchanged.
+
+## 0.5.6 stability experiments (2026-10-10)
+
+The assistant ran the same eight-transfer, 281.25 MB suite on the separate
+Windows 10 host, using pinned SSH and a demonstrated SYSTEM cleanup watchdog.
+The controller PC's VPN, routes and adapters were not changed. All pings below
+are to the server's tunnel address during idle, download, burst/smooth upload
+and duplex phases; they are not Internet-game latency measurements.
+
+| Candidate / ceiling | Verified transfers | Pings received/sent | Median / p95 / max ms | Outer reply expirations |
+| --- | ---: | ---: | --- | --- |
+| Original 0.5.5 / 9000 | 8/8 | 388/388 | 95 / 106 / 119 | 162 (0.02241%) |
+| Original 0.5.5 / 7500 | 8/8 | 360/360 | 95 / 110 / 131 | 118 (0.02141%) |
+| Smaller pacing batches / 9000 | 8/8 | 441/441 | 97 / 110 / 122 | 272 (0.04157%) |
+| Reorder only / 9000 | 7/8 | 467/467 | 100 / 115 / 130 | 1153 (0.13830%) |
+| Original 0.5.5 restored / 9000 | 8/8 | 401/401 | 94 / 104 / 118 | 764 (0.10503%) |
+| Reorder + repair / 9000 | 8/8 | 422/422 | 101 / 113 / 388 | 1053 (0.13992%) |
+| Reorder + repair / 8000 | 8/8 | 426/426 | 93 / 103 / 114 | 863 (0.12476%) |
+| Reorder + repair / 6000 | 8/8 | 421/421 | 94 / 102 / 116 | 434 (0.08565%) |
+
+The smaller-batch experiment was reverted: the final pacer retains the original
+2 ms credit cap and maximum 32-packet batch. Only an exact-boundary floating-point
+credit correction remains. The reorder-only candidate had a failed transfer;
+the 9000 repair candidate had a genuine 388 ms spike during smooth upload.
+Neither was adopted as the final operating profile.
+
+Restoring the original binary did not restore the earlier low timeout frequency.
+Path conditions varied during this sequential comparison, so the lower-ceiling
+results do not prove a causal percentage improvement. The 6000 run delivered
+24.53/22.37 Mbps for single 25/50 Mbps download targets, 24.39+22.89 Mbps parallel
+downloads, 24.76 Mbps burst upload, 18.57 Mbps smooth upload, and 18.20 Mbps upload
+with 24.37 Mbps download in duplex. It recorded one server native-queue expiry;
+client queue expiry, queue-full, reader/socket drops and host UDP error increments
+were zero. TCP endpoint snapshots still recorded 125 retransmits. Speed was not
+the optimization target, and the single-flow slowdown remains variable.
+
+Sampled authenticated packet hashes locate most observed outer loss between
+server send and client receipt. Thousands of replies also arrived out of order.
+This does not locate a particular router or prove intentional DPI interference.
+No server host UDP error increments or client reader drops explained those
+samples. Hash matches with repair enabled can come from either copy and cannot
+prove delivery of the original packet. Zero observed tunnel ping loss does not
+mean zero underlying loss, nor does a short run establish long-term stability.
+
+Local regression coverage includes bounded reorder storage, skipped gaps,
+timer release with no further arrivals, late delivery, association reset,
+backup spacing/expiry, handshake exclusion and disabled-option compatibility.
+Real WireGuard channel-TUN tests cover both directions, IPv4/IPv6 and MTU-sized
+payloads. A relay deliberately drops one nonempty encrypted native data packet
+in each direction; repair delivers each original IP packet without an application
+retry, and duplicate packets do not escape WireGuard replay protection.
+These tests create localhost sockets, not OS VPN interfaces or routes.
+
+### Exact 0.5.6 binaries and denser ping comparisons
+
+`go mod verify`, `go vet ./...` and the full fresh Go suite passed. The exact
+Windows/Linux amd64 release executables passed localhost packet-size, probe,
+unauthenticated-silence, burst and trace-correlation checks. An additional
+synthetic native-data fixture observed exactly one backup in each direction
+from each executable. Linux arm64 was cross-compiled only.
+
+The release was then tested with 20 Hz asynchronous small pings in addition to
+the standard suite's pings. Dense counts below use the first through last
+standard measurement ping as their window; raw startup/shutdown samples are
+retained separately. A single association remained active in each run.
+
+| 6000 requests/s profile | Verified transfers | Dense pings received/sent | Dense median / p95 / max ms | Outer expirations |
+| --- | ---: | ---: | --- | --- |
+| Protection on, first final run | 8/8 | 2180/2181 | 99 / 112 / 178 | 813 (0.13141%) |
+| Protection on, unchanged repeat | 7/8 | 2512/2513 | 95 / 106 / 125 | 1550 (0.22806%) |
+| Protection off, matched ceiling | 3/8 | 3095/3096 | 98 / 109 / 210 | 1843 (0.22007%) |
+| Protection restored, same ceiling | 7/8 | 2825/2825 | 98 / 113 / 164 | 1867 (0.24394%) |
+
+The protected repeat's failed 50 Mbps-target download received 60,220,176 of
+62,500,000 bytes before the diagnostic's 30-second deadline. It did not complete
+and is counted as a failure. The control timed out all five download transfers;
+all three uploads passed. Its single/parallel download rates were approximately
+4-10 Mbps versus 9-21 Mbps in the protected repeat. Similar outer timeout rates
+with different transfer outcomes suggest that ordering/repair helps tolerate
+loss; changing path conditions prevent claiming a controlled causal percentage.
+One dense active ping was lost in each of these runs, so ping-loss elimination
+and consistent latency improvement are not established. The protected first
+run had five client queue expirations, the protected repeat zero, and the control
+114; server active queue expirations were zero/one/zero respectively. After
+protection was restored, the only incomplete transfer was again the 50 Mbps
+target download. Its single/parallel download rates recovered to 8-19 Mbps and
+all 2825 dense active-window pings returned. There were zero client queue
+expirations, one server expiry, and 234 endpoint TCP retransmits. This on/off/on
+sequence supports improved transfer tolerance, not removal of the path loss.
+
+Raw dense results were 2244/2261, 2587/2591 and 3170/3174. Their additional
+failures occurred outside the defined measurement window while establishing or
+removing the tunnel; they are not silently included as successful data samples.
+The restored-protection run had 2902/2904 raw responses; both failures were
+outside the measurement window.
+The maximum 275 ms raw ping in the first run was during startup. Its 178 ms
+in-window maximum remains included. A 20-second server CPU sample during that
+run averaged 29.05% total busy time (42.16% peak), with CWG at 25.49% average;
+this does not establish an all-day CPU or multi-user capacity bound.
+
+### Selected 8000-request profile
+
+The lower 6000 ceiling was not retained: repeated 50 Mbps-target transfers hit
+their deadline, and less spare capacity left more backup copies unsent. The
+exact 0.5.6 release was retested at 8000 requests/s with reorder/repair enabled.
+All eight transfers completed and verified (281.25 MB). Standard pings were
+456/456, median/p95/max 99/108/117 ms. Dense active-window pings were 1994/1996
+(0.1002% observed loss), with median/p95/p99/max of 99/110/114/120 ms among
+replies. There were two genuine in-window timeouts; the other three failures
+in the 2068/2073 raw samples occurred outside the measurement window.
+
+Delivered rates were 24.44/27.63 Mbps for the single 25/50 Mbps targets,
+11.02+12.65 Mbps parallel downloads, 24.73 Mbps burst upload, 18.75 Mbps smooth
+upload, and 17.99 Mbps upload with 24.31 Mbps download in duplex. These rates
+are lower than earlier favorable runs and are reported without promising a
+fixed speed. The session had 1910 outer expirations (0.27440%), 46 loss backoffs,
+one client queue expiry, zero active server queue expiry, zero reader/socket
+drops or host UDP error increments, and 787 endpoint TCP retransmits. There was
+one association; no reconnect was recorded. No missing sampled native hash was
+observed in either direction, but either copy can satisfy a hash match.
+
+This selected profile improves transfer tolerance in these comparisons;
+it does not fix the underlying outer loss or demonstrate consistently lower
+latency than the original. The remaining losses occur between measured send
+and receipt points, which include OS/network components. DPI intent is not
+established. More frequent pings exposed loss missed by the standard suite.
+No claim of a loss-free path, future DPI immunity or multi-user readiness is made.
+
+Final live Windows/Linux amd64 hashes are recorded in release `SHA256SUMS`.
+The Linux service uses the verified release on UDP443, with the unchanged native
+1088-byte MTU. Client settings are 8000 requests/s, 2 ms reorder target and repair
+enabled. The old binary/configuration and a server rollback are preserved.

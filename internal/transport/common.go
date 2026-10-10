@@ -53,6 +53,14 @@ type Stats struct {
 	ExchangePriorFlightExpired atomic.Uint64
 	ExchangeRTTUS              atomic.Uint64
 	ExchangeLateReplies        atomic.Uint64
+	ExchangeReorderedReplies   atomic.Uint64
+	ExchangeReorderedRequests  atomic.Uint64
+	ExchangeReorderHeld        atomic.Uint64
+	ExchangeReorderLate        atomic.Uint64
+	ExchangeReorderForced      atomic.Uint64
+	ExchangeReorderWaitMaxUS   atomic.Uint64
+	ExchangeRepairSent         atomic.Uint64
+	ExchangeRepairExpired      atomic.Uint64
 	ExchangeSmallQueuePackets  atomic.Uint64
 	ExchangeSmallSent          atomic.Uint64
 	ExchangeSmallDelayMaxUS    atomic.Uint64
@@ -78,6 +86,11 @@ func (s *Stats) Snapshot() map[string]uint64 {
 		"exchange_loss_backoffs": s.ExchangeLossBackoffs.Load(), "exchange_delay_backoffs": s.ExchangeDelayBackoffs.Load(),
 		"exchange_prior_flight_replies": s.ExchangePriorFlightReplies.Load(), "exchange_prior_flight_expired": s.ExchangePriorFlightExpired.Load(),
 		"exchange_rtt_us": s.ExchangeRTTUS.Load(), "exchange_late_replies": s.ExchangeLateReplies.Load(),
+		"exchange_reordered_replies": s.ExchangeReorderedReplies.Load(),
+		"exchange_repair_sent":       s.ExchangeRepairSent.Load(), "exchange_repair_expired": s.ExchangeRepairExpired.Load(),
+		"exchange_reordered_requests": s.ExchangeReorderedRequests.Load(),
+		"exchange_reorder_held":       s.ExchangeReorderHeld.Load(), "exchange_reorder_late": s.ExchangeReorderLate.Load(),
+		"exchange_reorder_forced": s.ExchangeReorderForced.Load(), "exchange_reorder_wait_max_us": s.ExchangeReorderWaitMaxUS.Load(),
 		"exchange_small_queue_packets": s.ExchangeSmallQueuePackets.Load(),
 		"exchange_small_sent":          s.ExchangeSmallSent.Load(), "exchange_small_delay_max_us": s.ExchangeSmallDelayMaxUS.Load()}
 }

@@ -86,6 +86,62 @@ func TestExchangeBurstConfig(t *testing.T) {
 	}
 }
 
+func TestExchangeReorderValidation(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"client", "server"} {
+		c, err := Load(filepath.Join(dir, mode+".json"), mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Transport = "exchange"
+		if mode == "client" {
+			c.ExchangeMaxPPS = 9000
+		}
+		for _, ms := range []int{0, 1, 2, 5} {
+			c.ExchangeReorderMS = ms
+			if err := c.Validate(mode); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, ms := range []int{-1, 6} {
+			c.ExchangeReorderMS = ms
+			if c.Validate(mode) == nil {
+				t.Fatal("unbounded hold accepted")
+			}
+		}
+		c.ExchangeReorderMS = 2
+		if mode == "client" {
+			c.ExchangeMaxPPS = 0
+			if c.Validate(mode) == nil {
+				t.Fatal("fixed-rate client silently ignored reorder option")
+			}
+		}
+		c.Transport = "raw"
+		c.ExchangeMaxPPS = 0
+		if c.Validate(mode) == nil {
+			t.Fatal("raw transport accepted exchange option")
+		}
+		c.ExchangeReorderMS = 0
+		c.ExchangeRepair = true
+		if c.Validate(mode) == nil {
+			t.Fatal("raw transport accepted backup copies")
+		}
+		c.Transport = "exchange"
+		if mode == "client" {
+			if c.Validate(mode) == nil {
+				t.Fatal("fixed-rate client accepted backup copies")
+			}
+			c.ExchangeMaxPPS = 9000
+		}
+		if err := c.Validate(mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestRawPacingValidation(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bundle")
 	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {

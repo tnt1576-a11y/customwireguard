@@ -1,4 +1,40 @@
-# Experimental request/reply UDP (0.4.0 through 0.5.5)
+# Experimental request/reply UDP (0.4.0 through 0.5.6)
+
+## Optional stability protection in 0.5.6
+
+The live stability profile uses `exchange_max_pps: 8000` on the client,
+`exchange_reorder_ms: 2` and `exchange_repair: true` on both endpoints. Existing
+bulk and small-packet queues remain unchanged. Both new options default off;
+they require exchange transport, with adaptive scheduling on the client. They
+do not change the authenticated wire format and can be enabled independently.
+
+Reordering protection holds up to 128 authenticated outer sequence positions.
+In-order data passes immediately. A gap is skipped after the configured 1..5 ms
+target, including when no further packets arrive; late authenticated data is
+still delivered. Empty exchanges advance ordering too. Timing feedback is
+processed before buffering. This is a timer target, not a hard real-time bound:
+OS scheduling can make the observed hold longer. No reliable ordered stream or
+wait for a retransmission is introduced.
+
+Repair retains at most 256 recently sent native WireGuard data packets. Each
+may get one fresh outer encryption and sequence number in an otherwise empty
+scheduled slot, at least 5 ms after the original and before its 30 ms expiry.
+Primary queued data always wins. Handshakes are excluded. Native WireGuard
+authenticates and discards duplicates; repair caches reset with the association.
+Saturated traffic may leave no slots for copies, and both copies can be lost.
+
+Repair does not schedule extra requests or raise the ceiling. Copied payloads
+can affect the adaptive controller's useful-reply demand, so total traffic and
+CPU cost are not guaranteed identical to a run with repair disabled. The
+existing padded polling bandwidth cost remains substantial. `data_sent` and
+`data_received` include copies; they are not unique application-byte counters.
+
+New counters report reordered requests/replies, held/late/forced reorder
+deliveries and maximum hold time, plus repair copies sent and expired. Repair
+expiry counts discarded backups, not lost primary traffic. `exchange_expired`
+still counts missing outer replies, even if their native data was recovered by
+a copy. Short test results do not establish future DPI resistance or eliminate
+the remaining path loss. See [validation](VALIDATION.md#056-stability-experiments-2026-10-10).
 
 ## Congestion feedback in 0.5.5
 

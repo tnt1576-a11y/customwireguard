@@ -34,6 +34,14 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 	}
 	channels, cleanup := readersSized(ctx, stats, capacities, local, remote)
 	defer cleanup()
+	delivery := newExchangeReorder(cfg.ExchangeReorderMS, stats, func(data []byte) {
+		if send(local, wgAddr, data, stats) {
+			stats.Received.Add(1)
+		}
+	})
+	defer delivery.reset()
+	repair := exchangeRepair{enabled: cfg.ExchangeRepair, stats: stats}
+	defer repair.reset()
 	if cfg.ExchangeQueueMS == 0 {
 		cfg.ExchangeQueueMS = 60
 	}
@@ -72,9 +80,13 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-delivery.ready():
+			delivery.wake(time.Now())
 		case now := <-tick.C:
 			if active != nil && now.Sub(active.lastSeen) > 15*time.Second {
 				active = nil
+				delivery.reset()
+				repair.reset()
 				poll.Stop()
 				upload.clear()
 				upload.maxAge = time.Second
@@ -120,6 +132,11 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				}
 				at := time.Now()
 				payload := upload.pop(at)
+				backup := false
+				if len(payload) == 0 {
+					payload = repair.pop(at)
+					backup = len(payload) > 0
+				}
 				size := wire.RandomBetween(wire.ExchangeMinSize, wire.MaxDatagram)
 				out, e := active.sealSized(wire.Exchange, payload, size, at)
 				if e != nil {
@@ -130,6 +147,11 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 					stats.ExchangeRequests.Add(1)
 					if len(payload) > 0 {
 						stats.Sent.Add(1)
+						if backup {
+							stats.ExchangeRepairSent.Add(1)
+						} else {
+							repair.remember(payload, at)
+						}
 					}
 				}
 			}
@@ -170,10 +192,13 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				arm(now, 0)
 				continue
 			}
-			f, ok, _ := active.open(p.data, now)
+			f, ok, newest := active.open(p.data, now)
 			if !ok || f.Kind != wire.ExchangeReply {
 				stats.Rejected.Add(1)
 				continue
+			}
+			if !newest {
+				stats.ExchangeReorderedReplies.Add(1)
 			}
 			seq := binary.BigEndian.Uint64(f.Payload[:8])
 			flight, exists := flights.take(seq, len(p.data))
@@ -185,10 +210,8 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			stats.ExchangeReplies.Add(1)
 			useful := len(f.Payload) > 9
 			control.reply(now, now.Sub(flight.at), useful, f.Payload[8] != 0)
+			delivery.push(f.Sequence, f.Payload[9:], now)
 			if useful {
-				if send(local, wgAddr, f.Payload[9:], stats) {
-					stats.Received.Add(1)
-				}
 				busy(now)
 			} else {
 				stats.ExchangeEmpty.Add(1)

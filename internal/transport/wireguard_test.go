@@ -11,10 +11,12 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"customwireguard/internal/config"
+	"customwireguard/internal/wire"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/tuntest"
@@ -29,6 +31,9 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	t.Run("exchange", func(t *testing.T) { testRealWireGuard(t, false, 0, true) })
 	t.Run("adaptive-exchange", func(t *testing.T) { testRealWireGuard(t, false, -1, true) })
 	t.Run("burst-exchange", func(t *testing.T) { testRealWireGuard(t, false, -2, true) })
+	t.Run("reordered-exchange", func(t *testing.T) { testRealWireGuard(t, false, -3, true) })
+	t.Run("repair-exchange", func(t *testing.T) { testRealWireGuard(t, false, -4, true) })
+	t.Run("repair-with-loss", func(t *testing.T) { testRealWireGuard(t, false, -5, true) })
 }
 
 func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
@@ -86,6 +91,13 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 			if pace == -2 {
 				clientCfg.ExchangeBurstMS, serverCfg.ExchangeBurstMS = 200, 200
 			}
+			if pace == -3 {
+				clientCfg.ExchangeReorderMS, serverCfg.ExchangeReorderMS = 2, 2
+			}
+			if pace == -4 || pace == -5 {
+				clientCfg.ExchangeReorderMS, serverCfg.ExchangeReorderMS = 2, 2
+				clientCfg.ExchangeRepair, serverCfg.ExchangeRepair = true, true
+			}
 		}
 	}
 	if h3 {
@@ -94,7 +106,14 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 	if e = clientWG.IpcSet(fmt.Sprintf("public_key=%s\nendpoint=%s\n", hex.EncodeToString(serverKey.PublicKey().Bytes()), local.LocalAddr())); e != nil {
 		t.Fatal(e)
 	}
-	remote, e := net.DialUDP("udp4", nil, public.LocalAddr().(*net.UDPAddr))
+	endpoint := public.LocalAddr().(*net.UDPAddr)
+	var losses *[2]atomic.Uint32
+	if pace == -5 {
+		key, _ := clientCfg.Secret()
+		endpoint, losses = exchangeNativeLossRelay(t, endpoint, key)
+		clientCfg.Endpoint = endpoint.String()
+	}
+	remote, e := net.DialUDP("udp4", nil, endpoint)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -153,12 +172,89 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 				case <-time.After(8 * time.Second):
 					t.Fatalf("WireGuard timeout ipv6=%t size=%d reverse=%t stats=%v/%v", ipv6, size, reverse, cs.Snapshot(), ss.Snapshot())
 				}
+				if pace == -4 || pace == -5 {
+					select {
+					case <-to.Inbound:
+						t.Fatal("backup copy escaped native WireGuard replay protection")
+					case <-time.After(40 * time.Millisecond):
+					}
+				}
 			}
 		}
 	}
 	if cs.Established.Load() == 0 || ss.Established.Load() == 0 {
 		t.Fatal("no session established")
 	}
+	if (pace == -4 || pace == -5) && (cs.ExchangeRepairSent.Load() == 0 || ss.ExchangeRepairSent.Load() == 0) {
+		t.Fatal("backup copies were not exercised in both directions")
+	}
+	if losses != nil && (losses[0].Load() != 1 || losses[1].Load() != 1) {
+		t.Fatal("loss injection did not drop native data in both directions")
+	}
+}
+
+// Test-only relay knows this test's random outer key, so it can drop exactly
+// one nonempty native data packet in each direction, without dropping a
+// handshake or keepalive instead. Inner WireGuard keys remain with the devices.
+func exchangeNativeLossRelay(t *testing.T, server *net.UDPAddr, key []byte) (*net.UDPAddr, *[2]atomic.Uint32) {
+	t.Helper()
+	relay := socket(t)
+	losses := new([2]atomic.Uint32)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		bootstrap, _ := wire.NewExchangeCodec(key, nil, true)
+		var up, down *wire.Codec
+		var client *net.UDPAddr
+		buf := make([]byte, 65535)
+		for {
+			n, source, err := relay.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			data := buf[:n]
+			destination := server
+			var payload []byte
+			index := 0
+			if source.String() == server.String() {
+				index = 1
+				destination = client
+				if welcome, err := bootstrap.Open(data, time.Now()); err == nil && welcome.Kind == wire.Welcome && len(welcome.Payload) == 32 {
+					material := append(append([]byte{}, welcome.ID[:]...), welcome.Payload...)
+					up, _ = wire.NewExchangeCodec(key, material, false)
+					down, _ = wire.NewExchangeCodec(key, material, true)
+				} else if down != nil {
+					if f, err := down.Open(data, time.Now()); err == nil && f.Kind == wire.ExchangeReply && len(f.Payload) >= 9 {
+						payload = f.Payload[9:]
+					}
+				}
+			} else {
+				client = source
+				if up != nil {
+					if f, err := up.Open(data, time.Now()); err == nil && f.Kind == wire.Exchange {
+						payload = f.Payload
+					}
+				}
+			}
+			if len(payload) > 32 && binary.LittleEndian.Uint32(payload[:4]) == 4 && losses[index].CompareAndSwap(0, 1) {
+				continue
+			}
+			if destination != nil {
+				if _, err := relay.WriteToUDP(data, destination); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		relay.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("loss relay did not stop")
+		}
+	})
+	return relay.LocalAddr().(*net.UDPAddr), losses
 }
 
 func ipPacket(src, dst netip.Addr, size int) []byte {

@@ -60,6 +60,14 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 	}
 	channels, cleanup := readersSized(ctx, stats, capacities, conn, backend)
 	defer cleanup()
+	delivery := newExchangeReorder(cfg.ExchangeReorderMS, stats, func(data []byte) {
+		if send(backend, zeroAddr, data, stats) {
+			stats.Received.Add(1)
+		}
+	})
+	defer delivery.reset()
+	repair := exchangeRepair{enabled: cfg.ExchangeRepair, stats: stats}
+	defer repair.reset()
 	pacer := newPacketPacer(cfg, conn, stats)
 	defer pacer.reset()
 	var active, pending *association
@@ -77,6 +85,8 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-delivery.ready():
+			delivery.wake(time.Now())
 		case <-pacer.ready():
 			if active == nil || time.Since(active.lastSeen) >= 3*time.Minute {
 				pacer.reset()
@@ -100,6 +110,8 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 					pacer.reset()
 					downstream.clear()
 					active, pending = pending, nil
+					delivery.reset()
+					repair.reset()
 					a = active
 					stats.Established.Add(1)
 				} else {
@@ -117,10 +129,16 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 				switch f.Kind {
 				case wire.Exchange:
 					stats.ExchangeRequests.Add(1)
-					if len(f.Payload) > 0 && send(backend, zeroAddr, f.Payload, stats) {
-						stats.Received.Add(1)
+					if !newest {
+						stats.ExchangeReorderedRequests.Add(1)
 					}
+					delivery.push(f.Sequence, f.Payload, now)
 					payload := downstream.pop(now)
+					backup := false
+					if len(payload) == 0 {
+						payload = repair.pop(now)
+						backup = len(payload) > 0
+					}
 					reply := make([]byte, 9+len(payload))
 					binary.BigEndian.PutUint64(reply[:8], f.Sequence)
 					if downstream.length() > 0 {
@@ -134,6 +152,11 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 						stats.ExchangeReplies.Add(1)
 						if len(payload) > 0 {
 							stats.Sent.Add(1)
+							if backup {
+								stats.ExchangeRepairSent.Add(1)
+							} else {
+								repair.remember(payload, now)
+							}
 						} else {
 							stats.ExchangeEmpty.Add(1)
 						}
