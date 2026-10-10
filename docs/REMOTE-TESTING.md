@@ -15,8 +15,10 @@ addresses and public-key path. TCP port 2222 is the default.
 
 The setup refuses the controller PC, a nonphysical or routed management path,
 existing OpenSSH server files/service, an existing reserved account/rule or an
-occupied port. It installs the Windows capabilities if missing, creates the
-local cwgtest administrator account with an undisclosed random password, disables
+occupied port. Empty ordinary SSH/state folders are allowed; hidden entries,
+unreadable folders, directory links and files at those paths cause setup to stop
+with a specific error before installation. It installs the Windows capabilities
+if missing, creates the local cwgtest administrator account with an undisclosed random password, disables
 SSH password authentication, and accepts only the supplied public key from the
 controller address. Administrative access is required for tunnel services and
 test route changes; this is full administrative access to the test PC.
@@ -24,8 +26,10 @@ test route changes; this is full administrative access to the test PC.
 The listener binds only the test PC's LAN IPv4 address. Its firewall rule limits
 the source, local address, interface, program and port, with edge traversal
 disabled. A newly installed broad OpenSSH port22 rule is disabled. Key/config
-ACLs permit SYSTEM and Administrators. The script validates the SSH configuration
-before starting it and prints the public host-key fingerprint for verification
+ACLs permit SYSTEM and Administrators. Reused empty folders receive a fresh
+protected ACL, replacing any broad explicit grants as well as inherited ones.
+The script validates the SSH configuration before starting it and prints the
+public host-key fingerprint for verification
 over RDP. Pin that fingerprint in a dedicated known_hosts file before automation;
 do not disable host-key checks or send the controller private key to the test PC.
 

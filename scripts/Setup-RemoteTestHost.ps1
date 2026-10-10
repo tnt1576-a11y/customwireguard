@@ -36,20 +36,43 @@ $configPath=Join-Path $sshRoot 'sshd_config'
 $keyPath=Join-Path $sshRoot 'administrators_authorized_keys'
 $account='cwgtest'
 $rule='CWG-RemoteTest-SSH'
-if((Get-Service sshd -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $sshRoot) -or (Test-Path -LiteralPath $stateRoot)){
-    throw 'Existing OpenSSH server files/service or CWG setup found. Nothing changed; have the existing setup inspected before proceeding.'
+$existingService=Get-Service sshd -ErrorAction SilentlyContinue
+if($existingService){
+    throw ('Existing OpenSSH service found (status: '+$existingService.Status+'). Nothing changed; inspect that installation first.')
+}
+foreach($directory in @($sshRoot,$stateRoot)){
+    if(Test-Path -LiteralPath $directory -ErrorAction Stop){
+        $item=Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+        if(-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){
+            throw ('Expected an ordinary directory at '+$directory+'. Nothing changed.')
+        }
+        # An empty leftover directory is not an installed server. Include hidden
+        # entries and fail if listing is denied; never infer emptiness from an error.
+        $entries=@(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)
+        if($entries.Count){
+            throw ('Existing files found in '+$directory+' ('+$entries.Count+' entries). Nothing changed; inspect that directory first.')
+        }
+    }
 }
 if((Get-LocalUser -Name $account -ErrorAction SilentlyContinue) -or (Get-NetFirewallRule -Name $rule -ErrorAction SilentlyContinue)) {throw 'The reserved test account or firewall rule already exists. Nothing changed.'}
 if(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue){throw 'The requested SSH port is already in use.'}
 if(-not $PSCmdlet.ShouldProcess($env:COMPUTERNAME,"Install LAN-only SSH on ${TestAddress}:$Port for $ControllerAddress using a dedicated administrator account")){return}
 
 function Protect-AdminFile([string]$Path) {
-    & icacls.exe $Path /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
-    if($LASTEXITCODE -ne 0){throw 'Could not restrict file permissions.'}
-    & icacls.exe $Path /setowner '*S-1-5-32-544' | Out-Null
-    if($LASTEXITCODE -ne 0){throw 'Could not set administrator ownership.'}
+    $item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Refusing to set permissions through a directory link.'}
+    $acl=if($item.PSIsContainer){New-Object Security.AccessControl.DirectorySecurity}else{New-Object Security.AccessControl.FileSecurity}
+    $inheritance=if($item.PSIsContainer){[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'}else{[Security.AccessControl.InheritanceFlags]::None}
+    $acl.SetAccessRuleProtection($true,$false)
+    $acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+    foreach($sid in @('S-1-5-18','S-1-5-32-544')){
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),[Security.AccessControl.FileSystemRights]::FullControl,$inheritance,[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow))
+    }
+    # Replace the complete DACL, including any explicit broad grants left on an
+    # empty reused folder. Removing inheritance alone would retain those grants.
+    Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
 }
-New-Item -ItemType Directory -Path $stateRoot | Out-Null
+New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 Protect-AdminFile $stateRoot
 $state=[ordered]@{Version=1;Computer=$env:COMPUTERNAME;TestAddress=$TestAddress;ControllerAddress=$ControllerAddress;Port=$Port;Account=$account;AccountSID='';Rule=$rule;ConfigHash='';KeyHash='';Complete=$false;CreatedUTC=[DateTime]::UtcNow.ToString('o')}
 function Save-State { $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8 }
@@ -71,6 +94,7 @@ try {
     & $keygen -lf (Resolve-Path -LiteralPath $PublicKeyPath).Path | Out-Null
     if($LASTEXITCODE -ne 0){throw 'OpenSSH rejected the public key.'}
     New-Item -ItemType Directory -Path $sshRoot -Force | Out-Null
+    Protect-AdminFile $sshRoot
     & $keygen -A
     if($LASTEXITCODE -ne 0){throw 'SSH host key generation failed.'}
     Protect-AdminFile (Join-Path $sshRoot 'ssh_host_ed25519_key')
@@ -78,7 +102,7 @@ try {
     $rng=[Security.Cryptography.RandomNumberGenerator]::Create()
     try{$rng.GetBytes($random)}finally{$rng.Dispose()}
     $password=ConvertTo-SecureString ('Cwg!7a'+[Convert]::ToBase64String($random)) -AsPlainText -Force
-    $user=New-LocalUser -Name $account -Password $password -PasswordNeverExpires -UserMayNotChangePassword -Description 'CWG test automation; SSH public key access from the designated controller only'
+    $user=New-LocalUser -Name $account -Password $password -PasswordNeverExpires -UserMayNotChangePassword -Description 'Dedicated CWG remote test account'
     $state.AccountSID=$user.SID.Value;Save-State
     $admins=Get-LocalGroup -SID 'S-1-5-32-544'
     Add-LocalGroupMember -Group $admins -Member $user
