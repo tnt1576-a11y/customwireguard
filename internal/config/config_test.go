@@ -72,11 +72,13 @@ func TestExchangeBurstConfig(t *testing.T) {
 	}
 	c.Transport = "exchange"
 	c.ExchangeQueueMS = 60
-	c.ExchangeBurstMS = 200
-	if err := c.Validate("client"); err != nil {
-		t.Fatal(err)
+	for _, deadline := range []int{200, 350, 400} {
+		c.ExchangeBurstMS = deadline
+		if err := c.Validate("client"); err != nil {
+			t.Fatal(err)
+		}
 	}
-	for _, values := range [][2]int{{0, 200}, {60, 59}, {60, 251}, {200, 60}, {60, -1}} {
+	for _, values := range [][2]int{{0, 200}, {60, 59}, {60, 401}, {200, 60}, {60, -1}} {
 		c.ExchangeQueueMS, c.ExchangeBurstMS = values[0], values[1]
 		if c.Validate("client") == nil {
 			t.Fatal("invalid burst accepted", values)

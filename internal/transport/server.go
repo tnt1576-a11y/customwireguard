@@ -54,7 +54,11 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 		conn.Close()
 		return fmt.Errorf("set WireGuard backend receive buffer: %w", err)
 	}
-	channels, cleanup := readers(ctx, stats, conn, backend)
+	var capacities []int
+	if cfg.ExchangeBurstMS > 0 {
+		capacities = []int{256, 2048}
+	}
+	channels, cleanup := readersSized(ctx, stats, capacities, conn, backend)
 	defer cleanup()
 	pacer := newPacketPacer(cfg, conn, stats)
 	defer pacer.reset()
@@ -226,7 +230,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 				if len(p.data) == 0 || len(p.data) > wire.ExchangeMaxPayload {
 					stats.Oversize.Add(1)
 				} else {
-					downstream.push(p.data, now)
+					downstream.push(p.data, p.at)
 				}
 				continue
 			}

@@ -600,6 +600,30 @@ are included. A repeated user-run comparison is needed to measure the effect
 on kernel drops and download recovery. Bursty uploads can still exceed the
 200 ms client queue deadline; this server correction does not fix those drops.
 
+## Input queue and larger upload bursts (0.5.3)
+
+The user-run 0.5.2 repeat verified all eight transfers (281.25 MB). Downloads
+at 25/50 Mbit/s reached 24.52/46.42 Mbit/s; two parallel download averages were
+23.45 and 24.24 Mbit/s individually. Bursty/smooth uploads reached 23.40/23.73
+Mbit/s; simultaneous upload/download reached 23.70/24.52 Mbit/s. All 349 pings
+succeeded, median 95 ms, p95 100 ms, maximum 111 ms. Neither Linux host UDP
+receive-buffer errors nor either server socket's drop count increased.
+
+The larger kernel buffer exposed another bottleneck: 1791 packets were dropped
+at the server's bounded reader-to-event-loop handoff, despite zero exchange
+queue drops. Native sampled hashes missing downstream and TCP retransmissions
+remain consistent with local loss. Client queue expiry was 1104 packets, all
+in the deliberately bursty upload; smooth upload and duplex had none. The peak
+client queue was 1874 packets. There was no reset/socket error; all sampled
+outer hashes matched during transfer phases. Do not interpret that sampling
+as proof of zero outer loss or claim all downloads are now lossless.
+
+The 0.5.3 correction enlarges only the burst-enabled server's native handoff
+and permits a 350 ms client bulk deadline. Focused regression tests exercise
+input bounds, per-reader drop attribution, packet order/read timestamps,
+the measured 1874-packet upload burst, small-packet latency and hard expiry.
+Its effect on the target network requires another user-run comparison.
+
 ## Still not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,

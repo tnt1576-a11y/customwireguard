@@ -137,7 +137,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				continue
 			}
 			now := time.Now()
-			upload.push(p.data, now)
+			upload.push(p.data, p.at)
 			busy(now)
 		case p := <-channels[1]:
 			now := time.Now()

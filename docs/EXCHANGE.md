@@ -1,10 +1,31 @@
-# Experimental request/reply UDP (0.4.0 through 0.5.1)
+# Experimental request/reply UDP (0.4.0 through 0.5.3)
+
+## Input bursts in 0.5.3
+
+Burst-enabled servers now reserve 2048 packets for the native WireGuard socket's
+handoff to the event loop. The public input remains limited to 256 packets.
+This addresses a second loss point exposed after increasing the kernel receive
+buffer in 0.5.2. Exchange queue deadlines include time since the socket read;
+waiting in the handoff does not give packets a fresh deadline. Kernel residence
+before the read is not measured by this timestamp.
+
+The bulk deadline now accepts up to 400 ms. The next deployment uses 350 ms
+on the client and retains 200 ms on the server. An observed 1874-packet upload
+burst needs at least about 312 ms at 6000 requests/s, exceeding 200 ms.
+Small packets keep their 60 ms deadline and priority; the 1920 bulk/128 small
+queue capacities and sending ceiling are unchanged. This trades additional
+possible bulk waiting time for fewer burst drops; it does not add bandwidth.
+
+Reader drop and peak counters identify each socket: server reader 0 is public
+and reader 1 native; client reader 0 is native and reader 1 public. The existing
+queue_dropped aggregate is retained. Exchange queue expiration/full counters
+are separate from these input drops and from kernel UDP drops.
 
 ## Burst handling and investigation in 0.5.1
 
 On both peers, optionally add exchange_burst_ms: 200 alongside
 exchange_queue_ms: 60. The burst deadline must be at least the normal deadline
-and at most 250 ms. Omitting it preserves the previous FIFO behavior.
+and at most 400 ms as of 0.5.3 (250 ms previously). Omitting it preserves the previous FIFO behavior.
 
 When enabled, packets over 256 bytes use the bulk deadline. Smaller encrypted
 WireGuard packets retain the shorter deadline and can pass bulk packets, with

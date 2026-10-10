@@ -75,3 +75,46 @@ func TestExchangeBurstBoundFairnessAndExpiry(t *testing.T) {
 		t.Fatal("clear retained state")
 	}
 }
+
+func TestExchangeLargerUploadBurst(t *testing.T) {
+	for _, deadline := range []int{200, 350} {
+		now := time.Unix(1000, 0)
+		s := new(Stats)
+		q := newExchangeQueue(config.Config{ExchangeQueueMS: 60, ExchangeBurstMS: deadline}, s)
+		// The observed upload peak was 1874 packets, within the 1920 bulk cap.
+		// Include arrival/handoff time in its age, plus new small traffic.
+		for n := 0; n < 1874; n++ {
+			q.push(make([]byte, 1120), now)
+		}
+		bulk, small := 0, 0
+		for ms := 5; ms < 345; ms++ {
+			at := now.Add(time.Duration(ms) * time.Millisecond)
+			if ms%10 == 0 {
+				q.push(make([]byte, 80), at)
+			}
+			for n := 0; n < 6; n++ {
+				switch len(q.pop(at)) {
+				case 1120:
+					bulk++
+				case 80:
+					small++
+				}
+			}
+		}
+		if small != 34 || s.ExchangeSmallDelayMaxUS.Load() > 1000 || s.ExchangeQueueFull.Load() != 0 {
+			t.Fatal("small traffic delayed or queue overflow", deadline, s.Snapshot())
+		}
+		if deadline == 200 && s.ExchangeQueueExpired.Load() == 0 {
+			t.Fatal("old deadline failed to reproduce burst loss")
+		}
+		if deadline == 350 && (bulk != 1874 || s.ExchangeQueueExpired.Load() != 0) {
+			t.Fatal("extended deadline lost measured burst", s.Snapshot())
+		}
+		q.push(make([]byte, 1120), now)
+		q.push(make([]byte, 80), now)
+		q.expire(now.Add(time.Duration(deadline+1) * time.Millisecond))
+		if q.length() != 0 {
+			t.Fatal("hard deadline no longer bounds stale ingress")
+		}
+	}
+}

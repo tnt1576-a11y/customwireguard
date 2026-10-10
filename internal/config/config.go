@@ -100,8 +100,8 @@ func (c Config) Validate(mode string) error {
 	if c.ExchangeQueueMS != 0 && (c.Transport != "exchange" || c.ExchangeQueueMS < 20 || c.ExchangeQueueMS > 500) {
 		return errors.New("exchange_queue_ms requires exchange and must be 20..500")
 	}
-	if c.ExchangeBurstMS != 0 && (c.Transport != "exchange" || c.ExchangeQueueMS == 0 || c.ExchangeBurstMS < c.ExchangeQueueMS || c.ExchangeBurstMS > 250) {
-		return errors.New("exchange_burst_ms requires exchange_queue_ms and must be between that deadline and 250")
+	if c.ExchangeBurstMS != 0 && (c.Transport != "exchange" || c.ExchangeQueueMS == 0 || c.ExchangeBurstMS < c.ExchangeQueueMS || c.ExchangeBurstMS > 400) {
+		return errors.New("exchange_burst_ms requires exchange_queue_ms and must be between that deadline and 400")
 	}
 	if c.PaceKbps != 0 && (c.PaceKbps < 128 || c.PaceKbps > 100000) {
 		return errors.New("pace_kbps must be zero or 128..100000")

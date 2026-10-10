@@ -23,6 +23,8 @@ type Stats struct {
 	Rejected                  atomic.Uint64
 	Oversize                  atomic.Uint64
 	QueueDropped              atomic.Uint64
+	ReaderDropped             [2]atomic.Uint64
+	ReaderPeak                [2]atomic.Uint64
 	SocketErrors              atomic.Uint64
 	PacingQueued              atomic.Uint64
 	PacingDropped             atomic.Uint64
@@ -55,6 +57,8 @@ func (s *Stats) Snapshot() map[string]uint64 {
 	return map[string]uint64{"sessions": s.Established.Load(), "data_sent": s.Sent.Load(),
 		"data_received": s.Received.Load(), "rejected": s.Rejected.Load(), "oversize": s.Oversize.Load(),
 		"queue_dropped": s.QueueDropped.Load(), "socket_errors": s.SocketErrors.Load(),
+		"reader_0_dropped": s.ReaderDropped[0].Load(), "reader_1_dropped": s.ReaderDropped[1].Load(),
+		"reader_0_peak": s.ReaderPeak[0].Load(), "reader_1_peak": s.ReaderPeak[1].Load(),
 		"pacing_queued": s.PacingQueued.Load(), "pacing_dropped": s.PacingDropped.Load(),
 		"pacing_queue_bytes": s.PacingQueueBytes.Load(), "pacing_peak_bytes": s.PacingPeakBytes.Load(),
 		"pacing_wait_us": s.PacingWaitUS.Load(), "exchange_requests": s.ExchangeRequests.Load(),
@@ -81,11 +85,12 @@ func storeMax(dst *atomic.Uint64, value uint64) {
 type packet struct {
 	data []byte
 	addr netip.AddrPort
+	at   time.Time
 }
 
 // One fixed read buffer per socket; only bounded, correctly sized packets enter
 // the queue. Socket errors (including ICMP port-unreachable) do not kill retries.
-func pump(ctx context.Context, conn *net.UDPConn, out chan<- packet, stats *Stats, wg *sync.WaitGroup) {
+func pump(ctx context.Context, conn *net.UDPConn, out chan<- packet, stats *Stats, index int, wg *sync.WaitGroup) {
 	defer wg.Done()
 	buf := make([]byte, 65535)
 	for {
@@ -106,19 +111,33 @@ func pump(ctx context.Context, conn *net.UDPConn, out chan<- packet, stats *Stat
 			stats.Oversize.Add(1)
 			continue
 		}
+		at := time.Now()
 		stats.Trace.record("read", conn, addr, buf[:n])
-		p := packet{append([]byte(nil), buf[:n]...), addr}
+		p := packet{data: append([]byte(nil), buf[:n]...), addr: addr, at: at}
 		select {
 		case out <- p:
+			if index < len(stats.ReaderPeak) {
+				storeMax(&stats.ReaderPeak[index], uint64(len(out)))
+			}
 		case <-ctx.Done():
 			return
 		default:
 			stats.QueueDropped.Add(1)
+			if index < len(stats.ReaderDropped) {
+				stats.ReaderDropped[index].Add(1)
+			}
 		}
 	}
 }
 
 func readers(ctx context.Context, stats *Stats, conns ...*net.UDPConn) ([]chan packet, func()) {
+	return readersSized(ctx, stats, nil, conns...)
+}
+
+// Only the native backend of a burst-enabled server needs a larger handoff.
+// Keep the public unauthenticated input at its existing bound. Packet ages
+// begin at the socket read, so this queue cannot reset downstream deadlines.
+func readersSized(ctx context.Context, stats *Stats, capacities []int, conns ...*net.UDPConn) ([]chan packet, func()) {
 	var wg sync.WaitGroup
 	channels := make([]chan packet, len(conns))
 	stop := context.AfterFunc(ctx, func() {
@@ -127,9 +146,13 @@ func readers(ctx context.Context, stats *Stats, conns ...*net.UDPConn) ([]chan p
 		}
 	})
 	for i, c := range conns {
-		channels[i] = make(chan packet, 256)
+		capacity := 256
+		if i < len(capacities) {
+			capacity = capacities[i]
+		}
+		channels[i] = make(chan packet, capacity)
 		wg.Add(1)
-		go pump(ctx, c, channels[i], stats, &wg)
+		go pump(ctx, c, channels[i], stats, i, &wg)
 	}
 	return channels, func() {
 		stop()
