@@ -855,3 +855,38 @@ Release contents and binary hashes are recorded separately in `SHA256SUMS` and
 `BUILD-INFO.json`. The exact Windows executable has a separate localhost smoke
 test (`scripts/smoke.py`). No real server credentials or deployment configurations
 are in the release.
+
+## 2026-10-10: automatic test on the separate Windows 10 host
+
+The existing v0.5.5 client/server were exercised from Windows 10 Pro 19045 on an
+Intel i7-6700HQ, 16 GB RAM and 1 Gbit Ethernet after updating that host's signed
+WireGuard installation from 0.5.3 to 1.1.1. The older client failed to set metric
+and MTU; the updated client ran the unchanged 1088-byte profile. This is a new
+host/OS baseline, not a controlled performance comparison with the controller PC.
+
+The 16:45:29 UTC adaptive test completed 8/8 verified transfers (281.25 MB).
+All 367 tunnel pings succeeded: median 96 ms, p95 107 ms, maximum 119 ms. Phase
+medians remained 96-97 ms, including load. Delivered rates were 24.50/42.26 Mbps
+for the single 25/50 Mbps download targets, 24.51+24.52 Mbps in parallel,
+24.63 Mbps burst-paced upload, 18.48 Mbps smooth upload, and 18.83 Mbps upload
+with 24.51 Mbps download in duplex. The slower smooth upload and single-flow
+50 Mbps phase remain observations requiring investigation, not evidence of DPI.
+
+Client counters: one association, zero queue expiry/full/reader/socket drops,
+275 request expirations and three loss backoffs; zero delay backoffs. Server
+counter deltas within the ping window recorded two queue expirations, zero
+queue-full/reader/socket drops, and zero host UDP error increments. Post-stop
+server expirations were excluded. The endpoint's final TCP snapshots reported
+0/2 retransmits for the single 25/50 Mbps downloads, 177/13 for the parallel
+flows and 16 for the duplex download. Zero observed ping loss therefore does
+not imply zero underlying loss or retransmission.
+
+SSH and the RDP TCP port were reachable from the controller while Full mode was
+active. Successful, failed-start and deliberately interrupted runs all restored
+the original IPv6 binding and physical default route, with no CWG service left.
+An actual scheduled watchdog interruption produced Task Scheduler termination
+status 267014 and SYSTEM cleanup success without relying on runner finally.
+The eight offline cleanup fixtures also passed in Windows PowerShell 5.1 and 7.
+No CWG connection, adapter or route change was performed on the controller PC.
+These short tests establish remote test readiness, not future DPI resistance or
+multi-user capacity. Core protocol/binaries and server deployment were unchanged.

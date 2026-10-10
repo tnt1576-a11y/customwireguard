@@ -96,12 +96,55 @@ service, resource and transport counters; retrieve bounded results over the LAN.
 Only after these checks should repeated tests start automatically. Interactive
 video playback is separate from SSH's noninteractive session.
 
-This revision prepares access and documents the test procedure. Remote host
-installation, host identity, VPN continuity and the cleanup task are not verified
-until the user runs setup and the controller connects to that machine.
+`Invoke-RemoteTest.ps1` consumes a controller-created private state file and runs
+as a SYSTEM scheduled task. Its state contains Version (1), Computer, Mode
+(Smoke or Performance), Bundle, ControllerAddress, TestAddress, AdapterGuid,
+IPv6OriginallyEnabled, DeadlineUTC, CleanupTask and RunnerTask. Keep the state,
+scripts and client secrets under an administrator/SYSTEM-only directory. The
+runner requires a matching physical LAN route, the two-/1 profile, a future
+cleanup deadline, and a successful SYSTEM cleanup proof before changing IPv6 or
+starting a tunnel. It validates all eight transfer results in Performance mode.
+
+The controller first registers the cleanup action with `-KeepWatchdog`, a timed
+trigger and a startup trigger. It runs that action while the client is stopped,
+checks cleanup-result.json and the task result, then replaces the action with
+the normal cleanup command and verifies it before starting the runner. Configure
+cleanup retries and StartWhenAvailable; bound both tasks' execution time. The
+default cleanup stops the owning runner before stopping the specific CWG bundle,
+preventing that runner from restarting the tunnel after its deadline. The
+runner's normal finally block uses `-FromRunner` to avoid stopping itself.
+
+`Stop-RemoteTest.ps1` restores the recorded adapter's IPv6 binding even when
+client/runner cleanup reports an error. Errors retain the watchdog for retry;
+successful cleanup unregisters it. Completed runner tasks have no triggers and
+can be removed after collecting results. `Test-RemoteTestCleanup.ps1` covers
+normal, timed and proof cleanup, originally disabled IPv6, client/runner stop
+failures, and mismatched adapter/computer identities without changing real
+networking or services.
+
+On 2026-10-10, a separate Windows 10 Pro 19045 test host was verified over pinned
+Ed25519 SSH, with administrator access, a 1 Gbit physical Ethernet connection,
+and working SFTP. WireGuard 0.5.3 failed with "unable to set metric and MTU" for
+the 1088-byte profile. Its files were backed up and verified locally on the test
+host, then the signed official WireGuard 1.1.1 MSI was installed without reboot
+or UI launch. Its existing encrypted configuration was hash-checked unchanged.
+The same profile then worked. The controller's VPN/network configuration was
+not changed.
+
+Full-mode readiness passed 20/20 tunnel pings and an HTTPS exit-IP check. SSH and
+the RDP TCP port remained reachable while the VPN's two /1 routes were active;
+the test host retained its physical /24 route to the controller. This verifies network access
+to RDP, not an automated graphical login. The automatic performance run completed
+all eight verified transfers. Finally, shortening a dedicated active test's
+cleanup trigger exercised actual timed recovery: the runner was terminated and
+the tunnel removed, with IPv6 and the original default route restored. Evidence,
+host identity, paths and credentials stay in the ignored private workspace.
 
 Sources: [Microsoft installation](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse),
 [server configuration](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_server_configuration),
 and [WireGuard Windows routing/firewall behavior](https://github.com/WireGuard/wireguard-windows/blob/master/docs/netquirk.md).
 Standalone package: [Microsoft Win32-OpenSSH release](https://github.com/PowerShell/Win32-OpenSSH/releases/tag/10.0.0.0p2-Preview)
 and [ZIP installation documentation](https://github.com/PowerShell/Win32-OpenSSH/wiki/Install-Win32-OpenSSH).
+WireGuard update: [official Windows packages](https://download.wireguard.com/windows-client/),
+[old MTU configuration code](https://git.zx2c4.com/wireguard-windows/tree/tunnel/addressconfig.go?h=v0.5.3)
+and [current configuration code](https://git.zx2c4.com/wireguard-windows/tree/tunnel/addressconfig.go).
