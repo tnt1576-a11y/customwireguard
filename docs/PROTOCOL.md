@@ -55,7 +55,7 @@ for WireGuard authentication, encryption or key rotation.
 
 DATA (3) carries the untouched WireGuard UDP datagram. PING (4) and PONG (5) carry
 an eight-byte opaque value. Session sequences start at 1. Separate per-direction
-2048-packet replay windows reject duplicates and old packets while tolerating
+32768-packet replay windows reject duplicates and old packets while tolerating
 reordering. Timestamps accept at most 120 seconds in the past and 30 seconds in
 the future. Changing a timestamp requires a valid authentication tag.
 

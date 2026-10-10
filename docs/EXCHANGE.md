@@ -1,4 +1,61 @@
-# Experimental request/reply UDP (0.4.0)
+# Experimental request/reply UDP (0.4.0 and adaptive 0.5.0)
+
+## Adaptive scheduling in 0.5.0
+
+For the client, set transport to exchange, exchange_pps to 200,
+exchange_max_pps to 6000, and exchange_queue_ms to 60. On the server, set
+exchange_queue_ms to 60; exchange_max_pps is client-only. These are private
+JSON configuration fields. Leave native MTU unchanged while comparing rates.
+
+Omitting exchange_max_pps retains the legacy fixed scheduler. The adaptive
+ceiling accepts 200..12000 requests/second; the active base still accepts
+10..200 (100 when omitted). Idle polling stays around four/second. The initial
+6000/s ceiling permits roughly 52 Mbit/s of inner IP packets at MTU1088 before
+application overhead. At that ceiling, outer UDP payload traffic is about
+68 Mbit/s EACH way, excluding IP/link overhead. Replies require equal-sized
+requests even for a download, so upload usage is substantial.
+
+The controller initially sends at the base rate. Once authenticated replies
+show backlog, local queued data, or high response utilization, it doubles the
+rate per control interval up to its ceiling. The interval is at least100ms and
+at least the smoothed RTT. More than2% expired requests in a populated interval,
+or a minimum interval RTT over25ms above the session minimum, reduces the rate
+by30% with a recovery cooldown. Unused capacity decreases toward the base.
+This is an experimental controller, not a proven general-purpose congestion
+control algorithm; high-rate acceptance on the target network is unverified.
+
+Credits accrue by elapsed time. Timer wakeups are at least1ms apart, coalescing
+high-rate sends into at most2ms of traffic and never more than32datagrams.
+A delayed process cannot accumulate a large catch-up burst. UDP datagrams stay
+separate; this does not claim kernel batch I/O on either platform. Outstanding
+requests use bounded indexed storage and linear total expiry work, with a
+RTT/rate-sized working window and a hard16384 pending limit. Reply deadlines
+adapt between300ms and2s. Late authenticated replies are counted separately.
+The replay window is32768packets and remains fixed-memory.
+
+Explicit queue deadlines accept20..500ms and use at most2048native datagrams.
+The initial60ms deadline replaces the500ms baseline; expired and full-queue
+drops are separate counters. A cold client may hold at most one second of
+pre-association data, then starts its normal queue deadline when the outer
+association is ready, avoiding loss of the first native WireGuard handshake.
+No new cipher, outer retransmission, FEC, aggregation or fragmentation is added.
+
+Adaptive deployments report counters every5s. For tracing, both sides can use
+`--trace-sample 128` with `--trace`: the same datagram hash is selected at either
+endpoint, approximately1/128 of packets. A trace_config record declares the
+sampling. The Windows helper selects this automatically for adaptive clients.
+The100000record cap remains; samples must never be reported as a full capture.
+Unsampled aggregate counters still cover the whole session.
+
+The user-run Measure-AdaptivePerformance.ps1 requires the temporary
+tunnel-performance-server.py endpoint bound only to the WireGuard address.
+It transfers200MB of synthetic application payload with additional polling/
+padding overhead, measures ping throughout each load phase, validates complete
+transfers by SHA256, saves results, and stops CWG in finally. It starts no test
+automatically; the user must invoke it. The diagnostic HTTP is application data
+inside the UDP VPN, not a TCP-based outer transport.
+
+## Legacy fixed scheduler and wire format
 
 This changes the observed traffic pattern, not WireGuard's cryptography. The
 previous paced raw test still lost about 56% of outgoing packets and 60% of

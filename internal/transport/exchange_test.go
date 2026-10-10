@@ -156,10 +156,23 @@ func TestExchangeQueueBoundAndExpiry(t *testing.T) {
 }
 
 func TestExchangeRecoversAfterServerStateLoss(t *testing.T) {
+	testExchangeRecovery(t, false)
+}
+
+func TestAdaptiveExchangeRecoversAfterServerStateLoss(t *testing.T) {
+	testExchangeRecovery(t, true)
+}
+
+func testExchangeRecovery(t *testing.T, adaptive bool) {
 	public, backend, local, wg := socket(t), socket(t), socket(t), socket(t)
 	key := keyString()
 	sc := config.Config{Mode: "server", Transport: "exchange", Listen: public.LocalAddr().String(), WireGuard: backend.LocalAddr().String(), Key: key, Profile: "balanced"}
 	cc := config.Config{Mode: "client", Transport: "exchange", Listen: local.LocalAddr().String(), Endpoint: sc.Listen, WireGuard: wg.LocalAddr().String(), Key: key, Profile: "balanced"}
+	if adaptive {
+		cc.ExchangeMaxPPS = 6000
+		cc.ExchangeQueueMS = 60
+		sc.ExchangeQueueMS = 60
+	}
 	var serverStop context.CancelFunc
 	var serverDone chan error
 	start := func(c *net.UDPConn) {

@@ -27,6 +27,7 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	t.Run("h3", func(t *testing.T) { testRealWireGuard(t, true, 0, false) })
 	t.Run("paced-raw", func(t *testing.T) { testRealWireGuard(t, false, 1000, false) })
 	t.Run("exchange", func(t *testing.T) { testRealWireGuard(t, false, 0, true) })
+	t.Run("adaptive-exchange", func(t *testing.T) { testRealWireGuard(t, false, -1, true) })
 }
 
 func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
@@ -72,11 +73,16 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 	secret := keyString()
 	clientCfg := config.Config{Mode: "client", Listen: local.LocalAddr().String(), Endpoint: public.LocalAddr().String(), WireGuard: clientPort, Key: secret, Profile: "balanced"}
 	serverCfg := config.Config{Mode: "server", Listen: public.LocalAddr().String(), WireGuard: serverPort, Key: secret, Profile: "balanced"}
-	if pace != 0 {
+	if pace > 0 {
 		clientCfg.PaceKbps, serverCfg.PaceKbps = pace, pace
 	}
 	if exchange {
 		clientCfg.Transport, serverCfg.Transport = "exchange", "exchange"
+		if pace == -1 {
+			clientCfg.ExchangeMaxPPS = 6000
+			clientCfg.ExchangeQueueMS = 60
+			serverCfg.ExchangeQueueMS = 60
+		}
 	}
 	if h3 {
 		clientCfg, serverCfg = h3Configs(t, local.LocalAddr().String(), public.LocalAddr().String(), clientPort, serverPort)

@@ -112,6 +112,28 @@ func TestExchangeConfigValidation(t *testing.T) {
 		}
 	}
 	c.ExchangePPS = 100
+	for _, rate := range []int{200, 6000, 12000} {
+		c.ExchangeMaxPPS = rate
+		c.ExchangeQueueMS = 60
+		if e = c.Validate("client"); e != nil {
+			t.Fatal(e)
+		}
+	}
+	for _, rate := range []int{-1, 199, 12001} {
+		c.ExchangeMaxPPS = rate
+		if c.Validate("client") == nil {
+			t.Fatal("invalid adaptive ceiling accepted")
+		}
+	}
+	c.ExchangeMaxPPS = 6000
+	for _, age := range []int{-1, 19, 501} {
+		c.ExchangeQueueMS = age
+		if c.Validate("client") == nil {
+			t.Fatal("invalid queue age accepted")
+		}
+	}
+	c.ExchangeMaxPPS = 0
+	c.ExchangeQueueMS = 0
 	c.PaceKbps = 1000
 	if c.Validate("client") == nil {
 		t.Fatal("mixed pacing accepted")

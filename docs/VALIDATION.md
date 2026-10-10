@@ -475,7 +475,46 @@ response-only behavior, replay rejection, bounded/expired queues, malformed
 frames, request correlation and response destinations after reordering/migration.
 Real WireGuard IPv4/IPv6 at 1280-byte MTU passed over localhost in both directions.
 Seventeen offline startup fixtures passed PowerShell 7 and 5.1, including the
-native MTU guard. Target-network effectiveness remains user-run and unverified.
+native MTU guard.
+
+Subsequent user-run tests established short-session connectivity. At100requests/s,
+the small/large tunnel pings, Internet pings, DNS and three HTTPS checks passed.
+In a225.8second video comparison, all21797outgoing datagrams matched server reads;
+return delivery was complete except for the final8replies at client shutdown.
+Video-phase tunnel ping loss was5%, and replaying server arrival/request timing
+exactly reproduced248native-data queue expirations. This distinguishes the
+transport's own queue loss from outer path loss.
+
+At200requests/s, a128.4second comparison passed all90pings. Mean idle latency
+was98ms and video171ms; user reported smooth/mostly smooth240p playback. All24090
+outgoing datagrams matched server reads. Return delivery was complete except
+for17final replies at shutdown. The server still discarded141native packets
+(126expired,15queue-full), mainly in bursts. The server NIC capture had expired
+before this run; this comparison used both endpoint socket traces. Different
+duration and browser activity prevent treating absolute drop counts as a
+controlled rate comparison. None of this establishes the filtering mechanism.
+
+## Adaptive scheduler (0.5.0)
+
+The new opt-in client controller preserves the version2 request/reply format.
+Tests cover growth only after authenticated delivery, loss/delay backoff and
+cooldown, idle decay, bounded burst credits, exact request/size matching,
+out-of-order replies, slot reuse, expiry, queue-age/overflow counters, and
+deterministic hash sampling. Real WireGuard channel-TUN IPv4/IPv6/MTU and recovery
+after server state loss exercise the adaptive client over localhost.
+
+The carrier benchmark scripts/bench-exchange.py creates temporary keys and UDP
+endpoints, adds45ms in each direction, and offers simultaneous1/10/25/50Mbit/s
+payload traffic in five-second stages. The initial Windows development build
+delivered approximately50Mbit/s each way at the highest stage, with no payload
+loss; one-way p95 was below49ms including the45ms simulated path. This is a
+synthetic localhost carrier result, not end-to-end Internet or kernel-WireGuard
+throughput. The Windows system's ability to run this harness is also part of
+the measurement. Exact packaged binary validation is recorded with deployment.
+
+Three offline performance-helper fixtures cover successful integrity checks,
+failed transfers and cleanup after partial startup. Source and packaged client
+must also pass the existing startup/routing checks before deployment.
 
 ## Not verified here
 

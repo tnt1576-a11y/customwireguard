@@ -18,24 +18,48 @@ type exchangeItem struct {
 	at   time.Time
 }
 type exchangeQueue struct {
-	items []exchangeItem
-	stats *Stats
+	items    []exchangeItem
+	stats    *Stats
+	maxAge   time.Duration
+	capacity int
+}
+
+func newExchangeQueue(cfg config.Config, stats *Stats) exchangeQueue {
+	q := exchangeQueue{stats: stats, maxAge: 500 * time.Millisecond, capacity: 128}
+	if cfg.ExchangeQueueMS > 0 {
+		q.maxAge = time.Duration(cfg.ExchangeQueueMS) * time.Millisecond
+		q.capacity = 2048
+	}
+	return q
 }
 
 func (q *exchangeQueue) expire(now time.Time) {
-	for len(q.items) > 0 && now.Sub(q.items[0].at) > 500*time.Millisecond {
+	limit := q.maxAge
+	if limit == 0 {
+		limit = 500 * time.Millisecond
+	}
+	for len(q.items) > 0 && now.Sub(q.items[0].at) > limit {
 		q.items[0] = exchangeItem{}
 		q.items = q.items[1:]
 		q.stats.ExchangeQueueDropped.Add(1)
+		q.stats.ExchangeQueueExpired.Add(1)
 	}
+	q.stats.ExchangeQueuePackets.Store(uint64(len(q.items)))
 }
 func (q *exchangeQueue) push(data []byte, now time.Time) {
 	q.expire(now)
-	if len(q.items) >= 128 {
+	capacity := q.capacity
+	if capacity == 0 {
+		capacity = 128
+	}
+	if len(q.items) >= capacity {
 		q.stats.ExchangeQueueDropped.Add(1)
+		q.stats.ExchangeQueueFull.Add(1)
 		return
 	}
 	q.items = append(q.items, exchangeItem{data, now})
+	q.stats.ExchangeQueuePackets.Store(uint64(len(q.items)))
+	storeMax(&q.stats.ExchangeQueuePeak, uint64(len(q.items)))
 }
 func (q *exchangeQueue) pop(now time.Time) []byte {
 	q.expire(now)
@@ -43,13 +67,16 @@ func (q *exchangeQueue) pop(now time.Time) []byte {
 		return nil
 	}
 	data := q.items[0].data
+	storeMax(&q.stats.ExchangeQueueDelayMaxUS, uint64(max(0, now.Sub(q.items[0].at).Microseconds())))
 	q.items[0] = exchangeItem{}
 	q.items = q.items[1:]
+	q.stats.ExchangeQueuePackets.Store(uint64(len(q.items)))
 	return data
 }
 func (q *exchangeQueue) clear() {
 	q.stats.ExchangeQueueDropped.Add(uint64(len(q.items)))
 	q.items = nil
+	q.stats.ExchangeQueuePackets.Store(0)
 }
 
 type exchangeFlight struct {
@@ -58,6 +85,9 @@ type exchangeFlight struct {
 }
 
 func runExchangeClient(ctx context.Context, local, remote *net.UDPConn, cfg config.Config, stats *Stats) error {
+	if cfg.ExchangeMaxPPS > 0 {
+		return runAdaptiveExchangeClient(ctx, local, remote, cfg, stats)
+	}
 	if err := cfg.Validate("client"); err != nil {
 		local.Close()
 		remote.Close()
@@ -73,7 +103,7 @@ func runExchangeClient(ctx context.Context, local, remote *net.UDPConn, cfg conf
 	wgAddr := netip.MustParseAddrPort(cfg.WireGuard)
 	channels, cleanup := readers(ctx, stats, local, remote)
 	defer cleanup()
-	upload := exchangeQueue{stats: stats}
+	upload := newExchangeQueue(cfg, stats)
 	defer upload.clear()
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()

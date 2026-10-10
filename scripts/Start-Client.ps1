@@ -35,7 +35,11 @@ if ($cfg.transport -eq 'h3') {
         throw 'Request/reply UDP requires one explicit native WireGuard MTU between 576 and 1280.'
     }
     $pollRate = if ($cfg.exchange_pps) { $cfg.exchange_pps } else { 100 }
-    Write-Host ('Transport: encrypted UDP request/reply; active polling target '+$pollRate+'/s. Polling adds bandwidth overhead.')
+    if ($cfg.exchange_max_pps) {
+        Write-Host ('Transport: adaptive encrypted UDP request/reply; '+$pollRate+' to '+$cfg.exchange_max_pps+' requests/s. Download also uses upload bandwidth.')
+    } else {
+        Write-Host ('Transport: encrypted UDP request/reply; active polling target '+$pollRate+'/s. Polling adds bandwidth overhead.')
+    }
 } elseif ($cfg.pace_kbps -gt 0) {
     Write-Host ('Transport: encrypted UDP; client sending limit '+$cfg.pace_kbps+' kbit/s. The server controls its own sending limit.')
 }
@@ -105,6 +109,7 @@ try {
     if ($TracePackets) {
         $tracePath = Join-Path $bundlePath ('packets-' + $Mode.ToLowerInvariant() + '-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff') + '.jsonl')
         $clientArguments += @('-trace',('"' + $tracePath + '"'))
+		if ($cfg.exchange_max_pps) { $clientArguments += @('-trace-sample','128'); Write-Host 'Adaptive diagnostics sample packet hashes consistently at both peers (approximately 1/128).' }
         Write-Host ('Encrypted packet metadata will be saved to ' + $tracePath)
     }
     $process = Start-Process -FilePath $executablePath -ArgumentList $clientArguments -WorkingDirectory $bundlePath -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru

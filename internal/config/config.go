@@ -15,19 +15,21 @@ import (
 // One configuration and key pair serves one WireGuard peer. Use separate
 // processes/ports for additional peers to keep association and revocation simple.
 type Config struct {
-	Mode        string `json:"mode"`
-	Listen      string `json:"listen"`
-	Endpoint    string `json:"endpoint,omitempty"`
-	WireGuard   string `json:"wireguard"`
-	Key         string `json:"key"`
-	Profile     string `json:"profile"`
-	Transport   string `json:"transport,omitempty"`
-	TLSCert     string `json:"tls_cert,omitempty"`
-	TLSKey      string `json:"tls_key,omitempty"`
-	H3Target    string `json:"h3_target,omitempty"`
-	PaceKbps    int    `json:"pace_kbps,omitempty"`
-	PaceQueueMS int    `json:"pace_queue_ms,omitempty"`
-	ExchangePPS int    `json:"exchange_pps,omitempty"`
+	Mode            string `json:"mode"`
+	Listen          string `json:"listen"`
+	Endpoint        string `json:"endpoint,omitempty"`
+	WireGuard       string `json:"wireguard"`
+	Key             string `json:"key"`
+	Profile         string `json:"profile"`
+	Transport       string `json:"transport,omitempty"`
+	TLSCert         string `json:"tls_cert,omitempty"`
+	TLSKey          string `json:"tls_key,omitempty"`
+	H3Target        string `json:"h3_target,omitempty"`
+	PaceKbps        int    `json:"pace_kbps,omitempty"`
+	PaceQueueMS     int    `json:"pace_queue_ms,omitempty"`
+	ExchangePPS     int    `json:"exchange_pps,omitempty"`
+	ExchangeMaxPPS  int    `json:"exchange_max_pps,omitempty"`
+	ExchangeQueueMS int    `json:"exchange_queue_ms,omitempty"`
 }
 
 func Load(path string, mode string) (Config, error) {
@@ -90,6 +92,12 @@ func (c Config) Validate(mode string) error {
 	}
 	if c.ExchangePPS != 0 && (c.Transport != "exchange" || c.ExchangePPS < 10 || c.ExchangePPS > 200) {
 		return errors.New("exchange_pps requires exchange transport and must be 10..200")
+	}
+	if c.ExchangeMaxPPS != 0 && (c.Transport != "exchange" || mode != "client" || c.ExchangeMaxPPS < 200 || c.ExchangeMaxPPS > 12000 || c.ExchangeMaxPPS < c.ExchangePPS) {
+		return errors.New("exchange_max_pps is client-only, requires exchange, and must be 200..12000")
+	}
+	if c.ExchangeQueueMS != 0 && (c.Transport != "exchange" || c.ExchangeQueueMS < 20 || c.ExchangeQueueMS > 500) {
+		return errors.New("exchange_queue_ms requires exchange and must be 20..500")
 	}
 	if c.PaceKbps != 0 && (c.PaceKbps < 128 || c.PaceKbps > 100000) {
 		return errors.New("pace_kbps must be zero or 128..100000")

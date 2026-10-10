@@ -16,26 +16,36 @@ import (
 
 type Stats struct {
 	// Set before starting any readers; immutable for the run. Nil disables it.
-	Trace                *PacketTrace
-	Established          atomic.Uint64
-	Sent                 atomic.Uint64
-	Received             atomic.Uint64
-	Rejected             atomic.Uint64
-	Oversize             atomic.Uint64
-	QueueDropped         atomic.Uint64
-	SocketErrors         atomic.Uint64
-	PacingQueued         atomic.Uint64
-	PacingDropped        atomic.Uint64
-	PacingQueueBytes     atomic.Uint64
-	PacingPeakBytes      atomic.Uint64
-	PacingWaitUS         atomic.Uint64
-	ExchangeRequests     atomic.Uint64
-	ExchangeReplies      atomic.Uint64
-	ExchangeEmpty        atomic.Uint64
-	ExchangeExpired      atomic.Uint64
-	ExchangeQueueDropped atomic.Uint64
-	ExchangePending      atomic.Uint64
-	ExchangeWindowFull   atomic.Uint64
+	Trace                   *PacketTrace
+	Established             atomic.Uint64
+	Sent                    atomic.Uint64
+	Received                atomic.Uint64
+	Rejected                atomic.Uint64
+	Oversize                atomic.Uint64
+	QueueDropped            atomic.Uint64
+	SocketErrors            atomic.Uint64
+	PacingQueued            atomic.Uint64
+	PacingDropped           atomic.Uint64
+	PacingQueueBytes        atomic.Uint64
+	PacingPeakBytes         atomic.Uint64
+	PacingWaitUS            atomic.Uint64
+	ExchangeRequests        atomic.Uint64
+	ExchangeReplies         atomic.Uint64
+	ExchangeEmpty           atomic.Uint64
+	ExchangeExpired         atomic.Uint64
+	ExchangeQueueDropped    atomic.Uint64
+	ExchangePending         atomic.Uint64
+	ExchangeWindowFull      atomic.Uint64
+	ExchangeQueueExpired    atomic.Uint64
+	ExchangeQueueFull       atomic.Uint64
+	ExchangeQueuePackets    atomic.Uint64
+	ExchangeQueuePeak       atomic.Uint64
+	ExchangeQueueDelayMaxUS atomic.Uint64
+	ExchangeRatePPS         atomic.Uint64
+	ExchangeRateIncreases   atomic.Uint64
+	ExchangeBackoffs        atomic.Uint64
+	ExchangeRTTUS           atomic.Uint64
+	ExchangeLateReplies     atomic.Uint64
 }
 
 func (s *Stats) Snapshot() map[string]uint64 {
@@ -47,7 +57,20 @@ func (s *Stats) Snapshot() map[string]uint64 {
 		"pacing_wait_us": s.PacingWaitUS.Load(), "exchange_requests": s.ExchangeRequests.Load(),
 		"exchange_replies": s.ExchangeReplies.Load(), "exchange_empty": s.ExchangeEmpty.Load(),
 		"exchange_expired": s.ExchangeExpired.Load(), "exchange_queue_dropped": s.ExchangeQueueDropped.Load(),
-		"exchange_pending": s.ExchangePending.Load(), "exchange_window_full": s.ExchangeWindowFull.Load()}
+		"exchange_pending": s.ExchangePending.Load(), "exchange_window_full": s.ExchangeWindowFull.Load(),
+		"exchange_queue_expired": s.ExchangeQueueExpired.Load(), "exchange_queue_full": s.ExchangeQueueFull.Load(),
+		"exchange_queue_packets": s.ExchangeQueuePackets.Load(), "exchange_queue_peak": s.ExchangeQueuePeak.Load(),
+		"exchange_queue_delay_max_us": s.ExchangeQueueDelayMaxUS.Load(), "exchange_rate_pps": s.ExchangeRatePPS.Load(),
+		"exchange_rate_increases": s.ExchangeRateIncreases.Load(), "exchange_backoffs": s.ExchangeBackoffs.Load(),
+		"exchange_rtt_us": s.ExchangeRTTUS.Load(), "exchange_late_replies": s.ExchangeLateReplies.Load()}
+}
+
+func storeMax(dst *atomic.Uint64, value uint64) {
+	for old := dst.Load(); value > old; old = dst.Load() {
+		if dst.CompareAndSwap(old, value) {
+			return
+		}
+	}
 }
 
 type packet struct {

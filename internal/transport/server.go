@@ -50,7 +50,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 	pacer := newPacketPacer(cfg, conn, stats)
 	defer pacer.reset()
 	var active, pending *association
-	downstream := exchangeQueue{stats: stats}
+	downstream := newExchangeQueue(cfg, stats)
 	bootstrapLimit := bucket{rate: 100, burst: 200}
 	welcomeLimit := bucket{rate: 2, burst: 4}
 	pingLimit := bucket{rate: float64(rate), burst: float64(rate) * 1.5}

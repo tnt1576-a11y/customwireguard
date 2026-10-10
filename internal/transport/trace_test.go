@@ -94,3 +94,53 @@ func TestPacketTraceBoundedAndClosed(t *testing.T) {
 		t.Fatal("trace did not stop at its record limit")
 	}
 }
+
+func TestPacketTraceDeterministicSampling(t *testing.T) {
+	apath, bpath := filepath.Join(t.TempDir(), "a.jsonl"), filepath.Join(t.TempDir(), "b.jsonl")
+	a, e := OpenPacketTraceSampled(apath, 128)
+	if e != nil {
+		t.Fatal(e)
+	}
+	b, e := OpenPacketTraceSampled(bpath, 128)
+	if e != nil {
+		t.Fatal(e)
+	}
+	conn := socket(t)
+	for i := 0; i < 10000; i++ {
+		p := []byte{byte(i), byte(i >> 8), 1, 2, 3}
+		a.record("write", conn, zeroAddr, p)
+		b.record("read", conn, zeroAddr, p)
+	}
+	a.Close()
+	b.Close()
+	read := func(path string) map[string]bool {
+		raw, e := os.ReadFile(path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		out := map[string]bool{}
+		for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+			var r traceRecord
+			if json.Unmarshal(line, &r) != nil {
+				t.Fatal("bad JSON")
+			}
+			if r.Event == "trace_config" {
+				if r.SampleEvery != 128 {
+					t.Fatal("wrong sampling metadata")
+				}
+				continue
+			}
+			out[r.SHA256] = true
+		}
+		return out
+	}
+	aa, bb := read(apath), read(bpath)
+	if len(aa) < 20 || len(aa) > 140 || len(aa) != len(bb) {
+		t.Fatal("sampling rate/peer mismatch", len(aa), len(bb))
+	}
+	for key := range aa {
+		if !bb[key] {
+			t.Fatal("peer samples differed")
+		}
+	}
+}

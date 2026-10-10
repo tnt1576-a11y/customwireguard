@@ -5,6 +5,11 @@ carrier**. It carries complete native WireGuard datagrams and remains UDP-only;
 there is no TCP fallback. Each authenticated request permits one same-sized
 response; the server queues return traffic until the client requests it.
 See [request/reply mode and its bandwidth cost](docs/EXCHANGE.md).
+Version 0.5.0 adds optional adaptive request scheduling, a larger in-flight
+window, short native-data queue deadlines and sampled diagnostics. It preserves
+the same authenticated version-2 datagrams and one same-sized reply per request.
+The initial adaptive ceiling is 6000 requests/s, rather than the earlier
+200/s fixed ceiling. This is a configurable ceiling, not a promised Internet speed.
 The original raw carrier and its pacing option remain available for comparison.
 The earlier [HTTP/3 experiment](docs/HTTP3.md) remains
 available for reference, but failed preflight on the target network on both
@@ -44,6 +49,10 @@ audit and is not a drop-in replacement for a mature VPN product.
   IPv4/IPv6 packets in both directions at a 1280-byte tunnel MTU.
 - Version-separated request/reply mode, bounded queues and outstanding requests,
   idle/active polling, per-request response correlation and timeout counters.
+- Adaptive mode grows on authenticated delivery plus queue demand, backs off
+  on sustained RTT inflation/loss, and coalesces timer work into bounded batches.
+  A user-run transfer helper measures 10/25/50 Mbit/s download targets, upload,
+  simultaneous traffic, payload integrity and tunnel latency.
 
 One server process/outer secret serves **one active client**. Additional clients
 need separate instances, ports, WireGuard configurations and secrets. Starting a

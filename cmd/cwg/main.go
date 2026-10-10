@@ -18,7 +18,7 @@ import (
 	"customwireguard/internal/transport"
 )
 
-var version = "0.4.0-dev"
+var version = "0.5.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -49,6 +49,7 @@ func run(args []string) error {
 	count := f.Int("count", 5, "authenticated UDP probes (probe only, 1..100)")
 	probeSizes := f.String("sizes", "", "comma-separated UDP payload sizes (probe only, 256..1440, at most 32)")
 	tracePath := f.String("trace", "", "new private metadata trace (client/server, or Windows H3 probe; no packet bytes)")
+	traceSample := f.Int("trace-sample", 1, "deterministic metadata hash sample, 1..1024 (client/server with -trace)")
 	patternPath := f.String("pattern", "", "client metadata trace to reproduce (replay-probe only)")
 	replayStyle := f.String("style", "recorded", "recorded or paced (replay-probe only)")
 	probeRate := f.Int("probe-rate-limit", 20, "authenticated diagnostic reply limit, 20..200/s (server only)")
@@ -61,6 +62,9 @@ func run(args []string) error {
 	}
 	if f.NArg() != 0 {
 		return errors.New("unexpected positional argument")
+	}
+	if *traceSample < 1 || *traceSample > 1024 || (*traceSample != 1 && (*tracePath == "" || (command != "client" && command != "server"))) {
+		return errors.New("-trace-sample must be 1..1024 with a client/server -trace")
 	}
 	if *interfaceIndex < 0 || *interfaceIndex > 0xffffff || (*interfaceIndex != 0 && command != "client" && command != "probe") {
 		return errors.New("-interface-index must be 0..16777215 and is for client or H3 probe")
@@ -196,7 +200,7 @@ func run(args []string) error {
 	local.SetWriteBuffer(2 << 20)
 	stats := new(transport.Stats)
 	if *tracePath != "" {
-		stats.Trace, err = transport.OpenPacketTrace(*tracePath)
+		stats.Trace, err = transport.OpenPacketTraceSampled(*tracePath, *traceSample)
 		if err != nil {
 			return err
 		}
@@ -205,9 +209,13 @@ func run(args []string) error {
 				fmt.Fprintln(os.Stderr, "packet trace error:", err)
 			}
 		}()
-		fmt.Fprintln(os.Stderr, "Packet metadata trace enabled; maximum 100000 records; no packet bytes or keys.")
+		fmt.Fprintf(os.Stderr, "Packet metadata trace enabled; maximum 100000 records; deterministic sample 1/%d; no packet bytes or keys.\n", *traceSample)
 	}
-	go report(ctx, stats)
+	reportInterval := 30 * time.Second
+	if cfg.Transport == "exchange" && (cfg.ExchangeMaxPPS > 0 || cfg.ExchangeQueueMS > 0) {
+		reportInterval = 5 * time.Second
+	}
+	go report(ctx, stats, reportInterval)
 	fmt.Fprintln(os.Stderr, "cwg", version, command, "started; experimental transport; one WireGuard peer per instance")
 	if cfg.Transport == "h3" {
 		if command == "server" {
@@ -249,8 +257,8 @@ func parseProbeSizes(value string) ([]int, error) {
 	return sizes, nil
 }
 
-func report(ctx context.Context, stats *transport.Stats) {
-	ticker := time.NewTicker(30 * time.Second)
+func report(ctx context.Context, stats *transport.Stats, interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
