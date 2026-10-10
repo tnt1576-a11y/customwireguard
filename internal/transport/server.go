@@ -17,7 +17,7 @@ import (
 
 // RunServer owns conn and closes it on cancellation. The configured target is
 // always loopback; one instance serves one WireGuard peer/outer secret.
-func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats *Stats, diagnosticRate ...int) error {
+func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stats *Stats, diagnosticRate ...int) error {
 	rate := 20
 	if len(diagnosticRate) > 1 || (len(diagnosticRate) == 1 && (diagnosticRate[0] < 20 || diagnosticRate[0] > 200)) {
 		conn.Close()
@@ -135,6 +135,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 			if ok && a != nil {
 				// An older, reordered packet must not move the response endpoint back.
 				if newest {
+					learnAuthenticated(conn, p.addr)
 					if a.addr != p.addr {
 						pacer.rebind(p.addr)
 					}
@@ -237,6 +238,7 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 				}
 				history[f.ID] = seenBootstrap{p.addr, f.Kind, now.Add(155 * time.Second), fecRequested}
 			}
+			learnAuthenticated(conn, p.addr)
 			if f.Kind == wire.Probe {
 				out, e := bootstrap.Seal(wire.Frame{Kind: wire.ProbeReply, ID: f.ID, Timestamp: now.Unix(), Payload: fecBootstrap(fecRequested)}, len(p.data))
 				if e == nil {
@@ -297,5 +299,11 @@ func RunServer(ctx context.Context, conn *net.UDPConn, cfg config.Config, stats 
 			}
 			pacer.push(out, active.addr, now)
 		}
+	}
+}
+
+func learnAuthenticated(conn datagramSocket, addr netip.AddrPort) {
+	if learned, ok := conn.(interface{ authenticated(netip.AddrPort) }); ok {
+		learned.authenticated(addr)
 	}
 }

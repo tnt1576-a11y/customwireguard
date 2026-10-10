@@ -1,0 +1,32 @@
+[Unit]
+Description=CWG shared UDP server with independent user sessions
+After=network-online.target wg-quick@cwg0.service cwg-guard.service
+Wants=network-online.target
+Requires=wg-quick@cwg0.service cwg-guard.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+SupplementaryGroups=cwg-secrets
+RuntimeDirectory=cwg
+RuntimeDirectoryMode=0700
+ExecStart=/usr/local/lib/cwg/cwg server-multi -config /etc/cwg/server.json -status-file /run/cwg/status.json
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

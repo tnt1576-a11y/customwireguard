@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"net"
 	"net/netip"
 	"time"
 
@@ -27,7 +26,7 @@ type packetPacer struct {
 	write    func(packet) bool
 }
 
-func newPacketPacer(cfg config.Config, conn *net.UDPConn, stats *Stats) *packetPacer {
+func newPacketPacer(cfg config.Config, conn datagramSocket, stats *Stats) *packetPacer {
 	ms := cfg.PaceQueueMS
 	if ms == 0 {
 		ms = 150

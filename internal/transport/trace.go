@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/netip"
 	"os"
 	"sync"
@@ -59,7 +58,7 @@ func OpenPacketTraceSampled(path string, every int) (*PacketTrace, error) {
 	return t, nil
 }
 
-func (t *PacketTrace) record(event string, conn *net.UDPConn, addr netip.AddrPort, data []byte) {
+func (t *PacketTrace) record(event string, conn datagramSocket, addr netip.AddrPort, data []byte) {
 	if t == nil {
 		return
 	}

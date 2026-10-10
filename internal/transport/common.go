@@ -128,9 +128,20 @@ type packet struct {
 	at   time.Time
 }
 
+// A real UDP socket or an isolated user's view of a shared public socket.
+// The view preserves source addresses and owns only its own cancellation.
+type datagramSocket interface {
+	ReadFromUDPAddrPort([]byte) (int, netip.AddrPort, error)
+	WriteToUDPAddrPort([]byte, netip.AddrPort) (int, error)
+	Write([]byte) (int, error)
+	LocalAddr() net.Addr
+	RemoteAddr() net.Addr
+	Close() error
+}
+
 // One fixed read buffer per socket; only bounded, correctly sized packets enter
 // the queue. Socket errors (including ICMP port-unreachable) do not kill retries.
-func pump(ctx context.Context, conn *net.UDPConn, out chan<- packet, stats *Stats, index int, wg *sync.WaitGroup) {
+func pump(ctx context.Context, conn datagramSocket, out chan<- packet, stats *Stats, index int, wg *sync.WaitGroup) {
 	defer wg.Done()
 	buf := make([]byte, 65535)
 	for {
@@ -152,6 +163,9 @@ func pump(ctx context.Context, conn *net.UDPConn, out chan<- packet, stats *Stat
 			continue
 		}
 		at := time.Now()
+		if timed, ok := conn.(interface{ receivedAt() time.Time }); ok {
+			at = timed.receivedAt()
+		}
 		stats.Trace.record("read", conn, addr, buf[:n])
 		p := packet{data: append([]byte(nil), buf[:n]...), addr: addr, at: at}
 		select {
@@ -170,14 +184,14 @@ func pump(ctx context.Context, conn *net.UDPConn, out chan<- packet, stats *Stat
 	}
 }
 
-func readers(ctx context.Context, stats *Stats, conns ...*net.UDPConn) ([]chan packet, func()) {
+func readers(ctx context.Context, stats *Stats, conns ...datagramSocket) ([]chan packet, func()) {
 	return readersSized(ctx, stats, nil, conns...)
 }
 
 // Callers can size individual bounded handoffs for coalesced receive bursts.
 // Packet ages begin at the socket read, so increasing a handoff cannot reset
 // downstream deadlines. Omitted sizes retain the 256-packet default.
-func readersSized(ctx context.Context, stats *Stats, capacities []int, conns ...*net.UDPConn) ([]chan packet, func()) {
+func readersSized(ctx context.Context, stats *Stats, capacities []int, conns ...datagramSocket) ([]chan packet, func()) {
 	var wg sync.WaitGroup
 	channels := make([]chan packet, len(conns))
 	stop := context.AfterFunc(ctx, func() {
@@ -283,7 +297,7 @@ func (a *association) open(p []byte, now time.Time) (wire.Frame, bool, bool) {
 	return f, true, newest
 }
 
-func send(conn *net.UDPConn, addr netip.AddrPort, data []byte, stats *Stats) bool {
+func send(conn datagramSocket, addr netip.AddrPort, data []byte, stats *Stats) bool {
 	var err error
 	if addr.IsValid() {
 		_, err = conn.WriteToUDPAddrPort(data, addr)

@@ -32,8 +32,12 @@ fresh Debian installer now passes isolated real-WireGuard/NAT and lifecycle
 tests; see SERVER-SETUP.md for its one-client scope and limitations.
 Application splitting now has a working GUI/controller and separate-PC tests;
 see APPLICATION-CLIENT.md for its defined DNS, IPv6 and shutdown behavior.
-Telegram and independent-user features below remain incomplete until their
-source, runtime tests and operator-facing deliverables demonstrate completion.
+Independent-user source, provisioning and sandbox tests are now present; see
+MULTI-USER.md. The first shared-load test exposed oversubscribed client rate
+increases; a diagnostic fixed-rate comparison removed its observed probe loss.
+Coordinated rate control, WAN tests and deployment are still required. Telegram
+support remains unimplemented. Both features remain incomplete until their
+runtime tests and operator-facing deliverables demonstrate completion.
 
 ## Two or three independent users
 

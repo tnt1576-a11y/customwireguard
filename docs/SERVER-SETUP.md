@@ -7,8 +7,12 @@ container with real kernel WireGuard; arm64 is cross-compiled, not runtime teste
 
 This is a **fresh installation**, not an upgrade command for an existing CWG
 server. It refuses existing CWG files, reserved ports, firewall tables and
-overlapping tunnel networks before touching them. This revision provisions one
-independent client. Do not share its ZIP between simultaneous users.
+overlapping tunnel networks before touching them. The 0.6 development revision
+creates an initial `owner` account and supports separate named accounts; see
+[multi-user status and provisioning](MULTI-USER.md). Loaded WAN validation and
+coordinated rate control are still pending. Use matching 0.6 binaries and source;
+the published 0.5.8 installer remains the verified single-client release.
+Do not share one account's ZIP between simultaneous users.
 
 ## Install
 
@@ -74,8 +78,10 @@ curl.exe --ipv4 --max-time 20 https://api.ipify.org
 The probe checks the outer transport; the ping verifies WireGuard and the final
 request verifies Internet forwarding. Full mode requires a physical route to
 the server. Stop other VPNs before trying it. Stopping CWG removes the tunnel;
-the helper does not provide a persistent kill switch. Per-application selection
-is a separate feature and is not included in this installer revision.
+the helper does not provide a persistent kill switch. The export also includes
+the [application-selection GUI](APPLICATION-CLIENT.md): stop native CWG, run
+`.\scripts\Open-AppClient.ps1 -Bundle .\config`, install its pinned app engine,
+and select programs or folders before connecting.
 
 ## Verify, repeat and recover
 

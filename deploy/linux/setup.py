@@ -12,12 +12,19 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+from types import SimpleNamespace
 import zipfile
+
+# Management modules live in the owned program directory. Avoid creating
+# untracked bytecode there that would block a clean uninstall/reinstall.
+sys.dont_write_bytecode = True
 
 ROOT = Path('/etc/cwg')
 STATE = ROOT / 'install-state.json'
 BINARY = Path('/usr/local/lib/cwg/cwg')
 ADMIN = Path('/usr/local/lib/cwg/server-admin.py')
+USERS = Path('/usr/local/lib/cwg/users.py')
 WG = Path('/etc/wireguard/cwg0.conf')
 SYSCTL = Path('/etc/sysctl.d/90-cwg.conf')
 UNIT = Path('/etc/systemd/system')
@@ -73,7 +80,8 @@ def release_files(release):
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
     if not arch:
         raise ValueError('This installer requires Linux amd64 or arm64.')
-    required = [f'bin/cwg-linux-{arch}', 'bin/cwg-windows-amd64.exe', 'deploy/linux/cwg.service']
+    required = [f'bin/cwg-linux-{arch}', 'bin/cwg-windows-amd64.exe', 'deploy/linux/cwg.service',
+                'deploy/linux/cwg-multi.service', 'deploy/linux/users.py']
     required += ['scripts/' + x for x in SCRIPTS]
     required += [x for x in hashes if x.startswith('THIRD-PARTY-LICENSES/')]
     if not any(x.startswith('THIRD-PARTY-LICENSES/') for x in required):
@@ -136,7 +144,7 @@ WantedBy=multi-user.target
 
 def owned_path(path):
     p = PurePosixPath(str(path))
-    fixed = ('/usr/local/lib/cwg/cwg', '/usr/local/lib/cwg/server-admin.py',
+    fixed = ('/usr/local/lib/cwg/cwg', '/usr/local/lib/cwg/server-admin.py', '/usr/local/lib/cwg/users.py',
              '/etc/wireguard/cwg0.conf', '/etc/sysctl.d/90-cwg.conf',
              '/etc/systemd/system/cwg.service', '/etc/systemd/system/cwg-guard.service',
              '/etc/systemd/system/wg-quick@cwg0.service.d/cwg.conf')
@@ -144,10 +152,21 @@ def owned_path(path):
 
 
 def save(state):
-    temp = STATE.with_suffix('.stage')
-    temp.write_text(json.dumps(state, indent=2) + '\n')
-    temp.chmod(0o600)
-    os.replace(temp, STATE)
+    fd, name = tempfile.mkstemp(prefix='.install-state-', dir=STATE.parent)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(json.dumps(state, indent=2) + '\n')
+            stream.flush()
+            os.fchmod(stream.fileno(), 0o600)
+            os.fsync(stream.fileno())
+        os.replace(name, STATE)
+        directory = os.open(STATE.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(name).unlink(missing_ok=True)
 
 
 def read_state():
@@ -195,7 +214,20 @@ def verify(state):
         p = Path(name)
         if p.is_symlink() or not p.is_file() or digest(p) != expected:
             raise ValueError(f'Managed file changed or missing: {p}')
-    run(str(BINARY), 'check', '-config', str(ROOT / 'server.json'))
+    if state.get('mode') == 'multi':
+        import grp
+        credential_group = grp.getgrnam('cwg-secrets')
+        if credential_group.gr_mem:
+            raise ValueError('The CWG credential group has unexpected login members.')
+        if ROOT.stat().st_uid != 0 or ROOT.stat().st_gid != credential_group.gr_gid or ROOT.stat().st_mode & 0o777 != 0o750:
+            raise ValueError('Private configuration directory permissions changed.')
+        for p in [STATE, WG] + [Path(name) for name in state['files'] if ROOT in Path(name).parents]:
+            expected_mode = 0o640 if p == ROOT / 'server.json' else 0o600
+            if p.is_symlink() or p.stat().st_uid != 0 or p.stat().st_mode & 0o777 != expected_mode:
+                raise ValueError('A private file no longer has its required permissions.')
+        if (ROOT / 'server.json').stat().st_gid != credential_group.gr_gid:
+            raise ValueError('Server credential group changed.')
+    run(str(BINARY), 'check-multi' if state.get('mode') == 'multi' else 'check', '-config', str(ROOT / 'server.json'))
     run('systemctl', 'is-active', '--quiet', *UNITS)
     for family, name in (('ip', 'cwg_nat'), ('inet', 'cwg_guard')):
         run('nft', 'list', 'table', family, name, capture=True)
@@ -205,6 +237,15 @@ def verify(state):
     link = json.loads(run('ip', '-j', 'link', 'show', 'cwg0', capture=True).stdout)
     if len(link) != 1 or link[0]['mtu'] != 1280:
         raise ValueError('Native tunnel interface is not ready.')
+    if state.get('mode') == 'multi':
+        expected = {u['public_key']: {f"10.77.0.{u['slot']}/32", f"fd77:77:77::{u['slot']}/128"}
+                    for u in state['users'].values() if u['enabled']}
+        observed = {}
+        for line in run('wg', 'show', 'cwg0', 'allowed-ips', capture=True).stdout.splitlines():
+            key, *addresses = line.replace(',', ' ').split()
+            observed[key] = set(addresses)
+        if expected != observed:
+            raise ValueError('Active WireGuard peer identities or address isolation differs from managed state.')
 
 
 def export_client(state, release, verified):
@@ -231,8 +272,8 @@ Click Install app engine once, choose programs or application folders, then Conn
 The engine is downloaded from its official release and verified against pinned hashes.
 All Windows DNS uses the tunnel while app mode runs. Selected public IPv6 is blocked;
 LAN access bypasses the tunnel. Stop native CWG before using app mode.
-There is no kill switch after removal. This export currently supports one user;
-do not share one profile among simultaneous users.
+There is no kill switch after removal. This export is one user's private identity;
+create a separate named user on the server for each simultaneous device.
 ''')
     path.chmod(0o600)
     state['files'][str(path)] = digest(path)
@@ -297,10 +338,11 @@ def install(args):
     try:
         write_owned(state, BINARY, (release / executable).read_bytes(), 0o755)
         write_owned(state, ADMIN, Path(__file__).read_bytes(), 0o755)
+        write_owned(state, USERS, (release / 'deploy/linux/users.py').read_bytes(), 0o755)
         version = run(str(BINARY), 'version', capture=True).stdout.strip()
         match = re.fullmatch(r'cwg (\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?', version)
-        if not match or tuple(map(int, match.groups())) < (0, 5, 8):
-            raise ValueError('This installer requires CWG 0.5.8 or newer.')
+        if not match or tuple(map(int, match.groups())) < (0, 6, 0):
+            raise ValueError('This installer requires CWG 0.6.0 or newer.')
         generated = ROOT / 'generated'
         run(str(BINARY), 'init', '-out', str(generated), '-endpoint', ep)
         for path in generated.iterdir():
@@ -324,10 +366,15 @@ def install(args):
             run(str(BINARY), 'check', '-config', str(path))
         write_owned(state, ROOT / 'server.json', (generated / 'server.json').read_bytes())
         write_owned(state, WG, (generated / 'cwg0.conf').read_bytes())
+        import importlib.util
+        module_spec = importlib.util.spec_from_file_location('cwg_users', USERS)
+        users = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(users)
+        users.initialize(SimpleNamespace(WG=WG, run=run, save=save, digest=digest), state)
         write_owned(state, ROOT / 'guard.nft', rules)
         run('nft', '--check', '--file', str(ROOT / 'guard.nft'))
         write_owned(state, SYSCTL, settings, 0o644)
-        write_owned(state, UNIT / 'cwg.service', (release / 'deploy/linux/cwg.service').read_bytes(), 0o644)
+        write_owned(state, UNIT / 'cwg.service', (release / 'deploy/linux/cwg-multi.service').read_bytes(), 0o644)
         write_owned(state, UNIT / 'cwg-guard.service', guard, 0o644)
         write_owned(state, UNIT / 'wg-quick@cwg0.service.d/cwg.conf', '[Unit]\nRequires=cwg-guard.service\nAfter=cwg-guard.service\n', 0o644)
         run('systemctl', 'daemon-reload')
@@ -353,10 +400,13 @@ def install(args):
         raise
     print('Server services ready. Allow the outer UDP port in any provider firewall and test the exported client.')
     print('Private Windows client export: /etc/cwg/client.zip (copy securely; do not publish).')
+    print('Initial account: owner. Add independent users with: python3 /usr/local/lib/cwg/users.py add NAME')
 
 
 def uninstall():
     state = read_state()
+    if (ROOT / 'user-transaction.json').exists():
+        raise ValueError('Recover the pending user operation before uninstalling.')
     # Check every file before stopping services or removing any. Never erase
     # changes made outside this installer or follow a substituted symlink.
     for name, expected in state['files'].items():
@@ -377,6 +427,16 @@ def uninstall():
                 raise
             print(f'Preserved directory containing additional files: {path}')
     run('systemctl', 'daemon-reload')
+    if state.get('credential_group_created'):
+        import grp
+        try:
+            group = grp.getgrnam('cwg-secrets')
+            if not group.gr_mem:
+                run('groupdel', 'cwg-secrets')
+            else:
+                print('Preserved CWG credential group because external members were added.')
+        except KeyError:
+            pass
     print('Owned CWG files, services and tables removed. Dependency packages remain.')
     print('Live forwarding settings remain enabled in case another service now needs them; their CWG persistence file was removed.')
 

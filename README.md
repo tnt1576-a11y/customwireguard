@@ -32,7 +32,9 @@ For a separate Windows test PC, see [LAN remote test access](docs/REMOTE-TESTING
 For a fresh Debian 13 server, use the [verified server setup script](docs/SERVER-SETUP.md).
 It installs the current request/reply profile, keeps the native backend private,
 and exports a private Windows client ZIP. Existing installations are not upgraded
-by this command; this installer revision provisions one client.
+by this command. The published 0.5.8 installer provisions one client; the 0.6
+development installer and [independent-user management](docs/MULTI-USER.md) are
+under validation, including a remaining shared-rate stability issue.
 Windows application selection is available through the
 [application client](docs/APPLICATION-CLIENT.md). It supports program/folder
 include and exclude rules, using a pinned local routing engine with the existing
@@ -91,8 +93,9 @@ audit and is not a drop-in replacement for a mature VPN product.
   A user-run transfer helper measures 10/25/50 Mbit/s download targets, upload,
   simultaneous traffic, payload integrity and tunnel latency.
 
-One server process/outer secret serves **one active client**. Additional clients
-need separate instances, ports, WireGuard configurations and secrets. Starting a
+The legacy `cwg server` command serves **one active client** per outer secret.
+The development `server-multi` command provides separate contexts on one port;
+see its validation status above. Starting a
 second raw client with the same secret replaces the first association. HTTP/3
 rejects simultaneous flows instead. The `probe`
 command does not replace it.

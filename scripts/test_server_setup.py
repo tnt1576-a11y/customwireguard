@@ -67,7 +67,7 @@ class InstallerGuards(unittest.TestCase):
     def test_release_corruption_and_path_traversal_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            names = ['bin/cwg-linux-amd64', 'bin/cwg-windows-amd64.exe', 'deploy/linux/cwg.service', 'THIRD-PARTY-LICENSES/Go.txt']
+            names = ['bin/cwg-linux-amd64', 'bin/cwg-windows-amd64.exe', 'deploy/linux/cwg.service', 'deploy/linux/cwg-multi.service', 'deploy/linux/users.py', 'THIRD-PARTY-LICENSES/Go.txt']
             names += ['scripts/' + name for name in setup.SCRIPTS]
             entries = []
             for name in names:

@@ -18,7 +18,7 @@ import (
 	"customwireguard/internal/transport"
 )
 
-var version = "0.5.8-dev"
+var version = "0.6.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -33,6 +33,9 @@ func run(args []string) error {
 		return nil
 	}
 	command := args[0]
+	if command == "server-multi" || command == "check-multi" {
+		return runMulti(args[1:], command == "check-multi")
+	}
 	if command == "smooth-upload" {
 		return smoothUpload(args[1:])
 	}
@@ -285,6 +288,8 @@ func usage() {
   cwg tls-init -endpoint SERVER_IP:PORT -out NEW_PRIVATE_TLS_DIRECTORY
   cwg check -config FILE.json
   cwg server -config server.json
+  cwg check-multi -config multi-server.json
+  cwg server-multi -config multi-server.json -status-file /run/cwg/status.json
   cwg client -config client.json
   cwg smooth-upload -endpoint TUNNEL_IP:PORT -bytes 31250000 -bps 3125000
   cwg client -config client.json -trace NEW_PRIVATE_FILE.jsonl
