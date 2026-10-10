@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('cwg_server_setup', Path(__file__).resolve().parents[1] / 'deploy/linux/setup.py')
@@ -13,6 +14,30 @@ spec.loader.exec_module(setup)
 
 
 class InstallerGuards(unittest.TestCase):
+    def test_client_export_has_app_controls_without_server_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root, release = base / 'private', base / 'release'
+            (root / 'generated').mkdir(parents=True)
+            for name in ('client.json', 'cwg-test.conf', 'cwg-full.conf'):
+                (root / 'generated' / name).write_text('client fixture')
+            (root / 'generated' / 'cwg0.conf').write_text('SERVER-PRIVATE-KEY-FIXTURE')
+            verified = ['bin/cwg-windows-amd64.exe', 'THIRD-PARTY-LICENSES/Go.txt']
+            verified += ['scripts/' + name for name in setup.SCRIPTS]
+            for name in verified:
+                path = release / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('public fixture')
+            with patch.object(setup, 'ROOT', root), patch.object(setup, 'save'):
+                setup.export_client({'files': {}}, release, verified)
+            with zipfile.ZipFile(root / 'client.zip') as z:
+                names = set(z.namelist())
+                self.assertIn('cwg-client/scripts/Open-AppClient.ps1', names)
+                self.assertIn('cwg-client/scripts/App-EngineProcess.ps1', names)
+                self.assertIn('cwg-client/config/cwg-full.conf', names)
+                self.assertFalse(any('cwg0.conf' in name or 'server.json' in name for name in names))
+                self.assertFalse(any(b'SERVER-PRIVATE-KEY-FIXTURE' in z.read(name) for name in names))
+
     def test_endpoint_and_interface_reject_command_or_rule_injection(self):
         self.assertEqual(setup.endpoint('192.0.2.10'), '192.0.2.10:443')
         self.assertEqual(setup.endpoint('192.0.2.10:8443'), '192.0.2.10:8443')

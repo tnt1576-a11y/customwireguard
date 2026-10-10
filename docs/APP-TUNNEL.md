@@ -1,7 +1,9 @@
 # Application tunnel development status
 
-Application selection is not yet delivered. The normal 0.5.8 client and its
-stability profile remain the supported local test baseline.
+Application selection is now implemented using a separate local routing engine.
+See [Windows application client](APPLICATION-CLIENT.md) for controls, measured
+results and limits. The normal 0.5.8 carrier and native client are unchanged.
+The failed WireSock comparisons below explain why another local engine was used.
 
 ## WireSock compatibility results, 2026-10-10 UTC
 
@@ -31,7 +33,7 @@ installation was uninstalled successfully without reboot. The required Microsoft
 confirmed the original Ethernet default route and DNS, IPv6 binding enabled,
 and no trial UDP listeners or WireSock services.
 
-## Alternative verified so far
+## Alternative development path
 
 A private prototype using the existing WireGuard Go implementation and its
 userspace network stack connected through the unchanged CWG carrier. On the
@@ -41,28 +43,25 @@ public IPv4 address. The network stack performed name resolution inside the
 tunnel. It created no Windows interface or system route. This proves the basic
 alternative path, not completed app selection or stable loaded performance.
 
-The next implementation is a local TCP/UDP SOCKS endpoint backed by that network
-stack, with an application selector forwarding chosen processes into it. The
-SOCKS control connection is local; the Internet-facing carrier remains UDP.
-Evaluate [ProxiFyre](https://github.com/wiresock/proxifyre) for selection and GUI
-controls before writing a Windows filtering driver.
+The initial plan considered a custom local SOCKS endpoint and ProxiFyre. The
+delivered implementation instead uses sing-box 1.14.3 for userspace WireGuard,
+TUN routing, DNS and application rules in one engine. Its WireGuard endpoint
+successfully connects to the loopback CWG carrier. No ProxiFyre installation or
+custom SOCKS service is required; the Internet-facing carrier remains UDP.
 
-## Required checks before delivery
+## Validation scope
 
-- Authenticated loopback listener, bounded connections, UDP associations, buffers
-  and idle timeouts; no direct Internet fallback in the proxy.
-- Included and excluded applications, process paths and children, TCP and UDP,
-  LAN/RDP access, carrier exclusion, service lifecycle and reconnect recovery.
-- DNS behavior for Windows shared resolution and app-owned DNS. A successful
-  hostname request through an explicit SOCKS client alone is insufficient.
-- IPv6 routing and failure behavior. ProxiFyre currently documents that fragmented
-  IPv6 datagrams pass directly even when ordinary unsupported-family traffic is
-  blocked. Resolve or clearly constrain that behavior before claiming complete
-  app isolation; do not label IPv6 verified based only on an IPv4 test network.
-- Repeat the throughput and loaded-latency tests against the original client.
-  Keep failed comparisons and distinguish harness completion from functional
-  success. Cleanup verification must be newer than the finished run, not the
-  initial watchdog proof.
+The final implementation has no exposed SOCKS listener. Include/exclude modes,
+folder children, TCP/UDP, an uncached DNS query observed on the server, LAN access,
+carrier restart and supervisor failure were tested. Timestamped UDP measurements
+separate the actual transfer window from idle time. Final SYSTEM cleanup evidence
+postdates each completed run. Failed comparisons remain in the private evidence.
+
+The lab has no working public IPv6 path. Route ordering and a rejected connection
+were checked, but live dual-stack bypass/fragment handling remains a documented
+limit. Application routing is not a security boundary against deliberate route
+bypass, and there is no persistent kill switch after stop. See the operator guide
+for the common Windows DNS policy and lifecycle behavior.
 
 Sources: [WireSock CLI](https://www.wiresock.net/documentation/wiresock-secure-connect/wiresock-connect-cli.html),
 [WireSock proxy and app options](https://www.wiresock.net/documentation/wiresock-secure-connect/advanced-parameters.html),

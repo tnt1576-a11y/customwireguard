@@ -22,7 +22,9 @@ WG = Path('/etc/wireguard/cwg0.conf')
 SYSCTL = Path('/etc/sysctl.d/90-cwg.conf')
 UNIT = Path('/etc/systemd/system')
 UNITS = ('cwg.service', 'wg-quick@cwg0.service', 'cwg-guard.service')
-SCRIPTS = ('Start-Client.ps1', 'Stop-Client.ps1', 'WireGuard-Service.ps1', 'Diagnose-Client.ps1')
+SCRIPTS = ('Start-Client.ps1', 'Stop-Client.ps1', 'WireGuard-Service.ps1', 'Diagnose-Client.ps1',
+           'App-Tunnel.ps1', 'App-Tunnel.Common.ps1', 'App-EngineProcess.ps1',
+           'Open-AppClient.ps1', 'Install-AppEngine.ps1')
 
 
 def run(*args, capture=False, check=True):
@@ -223,8 +225,14 @@ Install official WireGuard Windows, extract this folder, then use Administrator 
 For IPv4 Internet access, start with -Mode Full instead.
 Stop with the same Stop-Client command. Public IPv6 is captured and rejected by
 the server; it does not fall back to the ISP while the Full tunnel is active.
+For application selection instead of the native Full tunnel:
+  .\\scripts\\Open-AppClient.ps1 -Bundle .\\config
+Click Install app engine once, choose programs or application folders, then Connect.
+The engine is downloaded from its official release and verified against pinned hashes.
+All Windows DNS uses the tunnel while app mode runs. Selected public IPv6 is blocked;
+LAN access bypasses the tunnel. Stop native CWG before using app mode.
 There is no kill switch after removal. This export currently supports one user;
-do not share one profile among simultaneous users. App selection is not included.
+do not share one profile among simultaneous users.
 ''')
     path.chmod(0o600)
     state['files'][str(path)] = digest(path)

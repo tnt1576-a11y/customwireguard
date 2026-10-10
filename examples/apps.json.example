@@ -1,0 +1,6 @@
+{
+  "mode": "Include",
+  "applications": [
+    { "kind": "exe", "path": "C:\\Program Files\\Mozilla Firefox\\firefox.exe" }
+  ]
+}

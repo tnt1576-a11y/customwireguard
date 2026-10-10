@@ -30,8 +30,9 @@ Residual loss remains (0.14725% outer timeouts and one client data expiry in tha
 run); this is not a long-term reliability or general latency guarantee. The
 fresh Debian installer now passes isolated real-WireGuard/NAT and lifecycle
 tests; see SERVER-SETUP.md for its one-client scope and limitations.
-App splitting, Telegram and independent-user features below remain
-incomplete until their relevant
+Application splitting now has a working GUI/controller and separate-PC tests;
+see APPLICATION-CLIENT.md for its defined DNS, IPv6 and shutdown behavior.
+Telegram and independent-user features below remain incomplete until their
 source, runtime tests and operator-facing deliverables demonstrate completion.
 
 ## Two or three independent users
@@ -65,11 +66,10 @@ loopback connection failed with a route-selection error. Its local SOCKS5 UDP
 comparison completed the control handshake but delivered no UDP to the local
 relay. This is not a usable integration. See APP-TUNNEL.md for the evidence and
 the userspace WireGuard alternative that passed an initial tunneled HTTPS test.
-Application selection is still unimplemented and must pass the remaining checks.
-Verify application include/exclude behavior, process children and executable
-paths, DNS and IPv6 behavior, local LAN/RDP access, and reconnect/cleanup. Test
-both selected-application and excluded-application modes without accidentally
-routing the carrier back into the tunnel. Preserve the existing native client
-until the alternative has passed tests on the separate PC. The WireSock test
-installation was removed; the original WireGuard client, route and IPv6 binding
-remain in place. No WireSock changes were made on the controller PC.
+Application selection now uses sing-box's userspace WireGuard endpoint and
+Windows application rules behind dedicated GUI controls. Include/exclude modes,
+folder children, DNS, LAN access, TCP/UDP and failure recovery passed on the
+separate PC. The final 32 MiB transfer window returned 218/218 UDP probes with
+p95 97.494 ms. Live public IPv6 bypass remains unverified because this lab has no
+working IPv6 WAN. The original native client is preserved, and the temporary
+WireSock installation was removed. No controller networking was changed.

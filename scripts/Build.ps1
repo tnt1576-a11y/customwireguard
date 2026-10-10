@@ -14,7 +14,7 @@ function Invoke-Go {
 }
 function Copy-TreeFiles([string]$Directory,[string]$DestinationRoot) {
     $origin=Join-Path $root $Directory
-    Get-ChildItem -LiteralPath $origin -Recurse -File | Where-Object { $_.Extension -in @('.go','.ps1','.py','.sh','.md','.service','.nft') } | ForEach-Object {
+    Get-ChildItem -LiteralPath $origin -Recurse -File | Where-Object { $_.Extension -in @('.go','.ps1','.py','.sh','.md','.service','.nft','.example') } | ForEach-Object {
         $relative=$_.FullName.Substring($root.Length+1)
         $destination=Join-Path $DestinationRoot $relative
         New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
@@ -43,7 +43,7 @@ try {
         $destination=Join-Path $release ("bin\cwg-$($target[0])-$($target[1])$($target[2])")
         Invoke-Go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$Version" -o $destination ./cmd/cwg
     }
-    foreach ($directory in @('scripts','deploy','docs')) { Copy-TreeFiles $directory $release }
+    foreach ($directory in @('scripts','deploy','docs','examples')) { Copy-TreeFiles $directory $release }
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $release
     $licenses=Join-Path $release 'THIRD-PARTY-LICENSES'
     New-Item -ItemType Directory -Path $licenses | Out-Null
@@ -68,7 +68,7 @@ try {
     Compress-Archive -LiteralPath $release -DestinationPath $archive
     $sourceDir=$release + '-source'
     New-Item -ItemType Directory -Path $sourceDir | Out-Null
-    foreach ($directory in @('cmd','internal','scripts','deploy','docs')) { Copy-TreeFiles $directory $sourceDir }
+    foreach ($directory in @('cmd','internal','scripts','deploy','docs','examples')) { Copy-TreeFiles $directory $sourceDir }
     foreach ($file in @('README.md','go.mod','go.sum','.gitignore')) { Copy-Item -LiteralPath (Join-Path $root $file) -Destination $sourceDir }
     $sourceArchive=$sourceDir + '.zip'
     Compress-Archive -LiteralPath $sourceDir -DestinationPath $sourceArchive

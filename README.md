@@ -33,6 +33,11 @@ For a fresh Debian 13 server, use the [verified server setup script](docs/SERVER
 It installs the current request/reply profile, keeps the native backend private,
 and exports a private Windows client ZIP. Existing installations are not upgraded
 by this command; this installer revision provisions one client.
+Windows application selection is available through the
+[application client](docs/APPLICATION-CLIENT.md). It supports program/folder
+include and exclude rules, using a pinned local routing engine with the existing
+UDP carrier. The separate-PC tests include TCP/UDP, DNS, LAN access and failure
+recovery. Native CWG remains available; stop it before using app mode.
 Version 0.5.0 adds optional adaptive request scheduling, a larger in-flight
 window, short native-data queue deadlines and sampled diagnostics. It preserves
 the same authenticated version-2 datagrams and one same-sized reply per request.
