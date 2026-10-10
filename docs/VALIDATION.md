@@ -654,6 +654,30 @@ idle/video/idle comparison using the existing Measure-VideoLoad helper and
 synthetic transfers. Remaining burst-capacity/expiry loss is unresolved;
 larger buffers alone do not add sending capacity or prove future stability.
 
+The user completed that video comparison on 0.5.3 and reported smooth or mostly
+smooth fixed-1080p playback. The association lasted about 412.8 seconds including
+prompts, with three measured phases of about 122 seconds each. All 360 pings
+succeeded. Idle-before/video/idle-after mean RTTs were 101.0/96.6/101.8 ms;
+medians were 101/95/101 ms, p95 values 106/105/108 ms, and maxima 116/112/121 ms.
+The video phase received 53.79 MB and sent 3.72 MB on the tunnel interface;
+these are interface traffic measurements, not video encoding bitrate or capacity.
+
+There was one uninterrupted client association, no socket errors, no reader
+handoff drops on either peer, and no server socket-buffer drops. Server counters
+were compared with a pre-phase baseline after association establishment to
+exclude earlier runs and offline keepalive expiry. During video, 1352 server
+bulk packets expired at the existing deadline. Five client packets expired
+during the prompt between video and final idle; no client queue drops occurred
+inside the three measured phases. This remains a working short-session baseline
+with unresolved burst loss. Smooth playback is not evidence of zero packet loss.
+
+The sampled outer trace also contained two unmatched client writes and one
+unmatched server write during video. It was uncapped and sampled at 1/128;
+these observations do not give an exact full-session loss rate or locate the
+loss within the path. The client counted 83 expired outer requests and two
+rate backoffs without reconnecting. This run did not reproduce a complete
+5-10 second connection cutoff, but does not establish long-term DPI resistance.
+
 ## Still not verified here
 
 - Sustained full-tunnel internet reliability, DNS behavior across applications,
