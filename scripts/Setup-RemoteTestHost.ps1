@@ -5,7 +5,9 @@ param(
     [Parameter(Mandatory)][string]$ControllerAddress,
     [Parameter(Mandatory)][string]$TestAddress,
     [Parameter(Mandatory)][string]$PublicKeyPath,
-    [ValidateRange(1024,65535)][int]$Port=2222
+    [ValidateRange(1024,65535)][int]$Port=2222,
+    [string]$OpenSshArchive='',
+    [switch]$ResumeFailedInstall
 )
 $ErrorActionPreference='Stop'
 function Get-PrivateIPv4([string]$Value) {
@@ -36,6 +38,9 @@ $configPath=Join-Path $sshRoot 'sshd_config'
 $keyPath=Join-Path $sshRoot 'administrators_authorized_keys'
 $account='cwgtest'
 $rule='CWG-RemoteTest-SSH'
+$bundledBin=Join-Path $env:ProgramFiles 'CWGOpenSSH'
+$resumeState=$false
+$archiveHash='23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5'
 $existingService=Get-Service sshd -ErrorAction SilentlyContinue
 if($existingService){
     throw ('Existing OpenSSH service found (status: '+$existingService.Status+'). Nothing changed; inspect that installation first.')
@@ -50,15 +55,29 @@ foreach($directory in @($sshRoot,$stateRoot)){
         # entries and fail if listing is denied; never infer emptiness from an error.
         $entries=@(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)
         if($entries.Count){
+            if($ResumeFailedInstall -and $directory -eq $stateRoot -and $entries.Count -eq 1 -and $entries[0].Name -eq 'setup-state.json' -and -not $entries[0].PSIsContainer -and -not ($entries[0].Attributes -band [IO.FileAttributes]::ReparsePoint)){
+                $old=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+                # Only the exact state left before accounts/configuration existed is
+                # resumable. Never adopt a working or partly configured SSH server.
+                if($old.Version -eq 1 -and $old.Computer -eq $env:COMPUTERNAME -and $old.TestAddress -eq $TestAddress -and $old.ControllerAddress -eq $ControllerAddress -and $old.Port -eq $Port -and $old.Account -eq $account -and $old.Rule -eq $rule -and $old.Complete -is [bool] -and -not $old.Complete -and $old.AccountSID -ceq '' -and $old.ConfigHash -ceq '' -and $old.KeyHash -ceq ''){
+                    $resumeState=$true
+                    continue
+                }
+            }
             throw ('Existing files found in '+$directory+' ('+$entries.Count+' entries). Nothing changed; inspect that directory first.')
         }
     }
 }
 if((Get-LocalUser -Name $account -ErrorAction SilentlyContinue) -or (Get-NetFirewallRule -Name $rule -ErrorAction SilentlyContinue)) {throw 'The reserved test account or firewall rule already exists. Nothing changed.'}
 if(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue){throw 'The requested SSH port is already in use.'}
+if($OpenSshArchive){
+    if(Test-Path -LiteralPath $bundledBin -ErrorAction Stop){throw 'CWGOpenSSH binary directory already exists. Nothing changed; inspect it first.'}
+    $OpenSshArchive=(Resolve-Path -LiteralPath $OpenSshArchive -ErrorAction Stop).Path
+    if((Get-FileHash -LiteralPath $OpenSshArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $archiveHash){throw 'Bundled OpenSSH archive hash does not match the pinned Microsoft release. Nothing changed.'}
+}
 if(-not $PSCmdlet.ShouldProcess($env:COMPUTERNAME,"Install LAN-only SSH on ${TestAddress}:$Port for $ControllerAddress using a dedicated administrator account")){return}
 
-function Protect-AdminFile([string]$Path) {
+function Protect-AdminFile([string]$Path,[switch]$AllowReadExecute) {
     $item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Refusing to set permissions through a directory link.'}
     $acl=if($item.PSIsContainer){New-Object Security.AccessControl.DirectorySecurity}else{New-Object Security.AccessControl.FileSecurity}
@@ -68,27 +87,64 @@ function Protect-AdminFile([string]$Path) {
     foreach($sid in @('S-1-5-18','S-1-5-32-544')){
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),[Security.AccessControl.FileSystemRights]::FullControl,$inheritance,[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow))
     }
+    if($AllowReadExecute){
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-11'),[Security.AccessControl.FileSystemRights]::ReadAndExecute,$inheritance,[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow))
+    }
     # Replace the complete DACL, including any explicit broad grants left on an
     # empty reused folder. Removing inheritance alone would retain those grants.
     Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
 }
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 Protect-AdminFile $stateRoot
+if($resumeState){
+    Copy-Item -LiteralPath $statePath -Destination (Join-Path $stateRoot ('failed-install-'+[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')+'.json')) -ErrorAction Stop
+    Write-Host 'Preserved the incomplete pre-install state; retrying with the selected installation source.'
+}
 $state=[ordered]@{Version=1;Computer=$env:COMPUTERNAME;TestAddress=$TestAddress;ControllerAddress=$ControllerAddress;Port=$Port;Account=$account;AccountSID='';Rule=$rule;ConfigHash='';KeyHash='';Complete=$false;CreatedUTC=[DateTime]::UtcNow.ToString('o')}
 function Save-State { $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8 }
 Save-State
 try {
-    foreach($capability in @('OpenSSH.Client~~~~0.0.1.0','OpenSSH.Server~~~~0.0.1.0')) {
-        if((Get-WindowsCapability -Online -Name $capability).State -ne 'Installed'){
-            $installed=Add-WindowsCapability -Online -Name $capability
-            if($installed.RestartNeeded){throw 'Windows requires a restart to complete OpenSSH installation. Access has not been enabled.'}
+    if($OpenSshArchive){
+        Write-Host 'Installing bundled Microsoft OpenSSH 10.0.0.0p2-Preview; Windows optional-feature installation is not used.'
+        # Copy into the protected state directory and verify again before extraction
+        # so the original user-writable package cannot change after verification.
+        $protectedArchive=Join-Path $stateRoot 'OpenSSH-Win64.zip'
+        Copy-Item -LiteralPath $OpenSshArchive -Destination $protectedArchive -ErrorAction Stop
+        if((Get-FileHash -LiteralPath $protectedArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $archiveHash){throw 'Copied OpenSSH archive failed verification.'}
+        $staging=Join-Path $stateRoot 'openssh-staging'
+        Expand-Archive -LiteralPath $protectedArchive -DestinationPath $staging -ErrorAction Stop
+        $payload=Join-Path $staging 'OpenSSH-Win64'
+        foreach($file in @(Get-ChildItem -LiteralPath $payload -File | Where-Object Extension -in '.exe','.dll','.ps1','.psm1')){
+            $signature=Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|,\s*)O=Microsoft Corporation(,|$)'){throw ('Microsoft signature validation failed: '+$file.Name)}
         }
+        New-Item -ItemType Directory -Path $bundledBin -ErrorAction Stop | Out-Null
+        Protect-AdminFile $bundledBin -AllowReadExecute
+        Get-ChildItem -LiteralPath $payload -File | Copy-Item -Destination $bundledBin -ErrorAction Stop
+        $sshBin=$bundledBin
+        $sshd=Join-Path $sshBin 'sshd.exe'
+        $state['BinaryDirectory']=$sshBin
+        $state['InstallSource']='Microsoft ZIP 10.0.0.0p2-Preview'
+        Save-State
+        # Register only the server, leaving any existing ssh-agent and PATH intact.
+        # These service privileges match Microsoft's install-sshd.ps1.
+        $binaryCommand='"'+$sshd+'" -E "'+(Join-Path $stateRoot 'sshd.log')+'"'
+        New-Service -Name sshd -DisplayName 'OpenSSH SSH Server (CWG test host)' -BinaryPathName $binaryCommand -StartupType Manual -Description 'LAN-only CWG test host access' | Out-Null
+        & (Join-Path $env:WINDIR 'System32\sc.exe') privs sshd 'SeAssignPrimaryTokenPrivilege/SeTcbPrivilege/SeBackupPrivilege/SeRestorePrivilege/SeImpersonatePrivilege' | Out-Null
+        if($LASTEXITCODE -ne 0){throw 'Could not configure OpenSSH server privileges.'}
+    } else {
+        foreach($capability in @('OpenSSH.Client~~~~0.0.1.0','OpenSSH.Server~~~~0.0.1.0')) {
+            if((Get-WindowsCapability -Online -Name $capability).State -ne 'Installed'){
+                $installed=Add-WindowsCapability -Online -Name $capability
+                if($installed.RestartNeeded){throw 'Windows requires a restart to complete OpenSSH installation. Access has not been enabled.'}
+            }
+        }
+        # Only the Windows feature installation can introduce this broad rule.
+        Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Disable-NetFirewallRule | Out-Null
+        $sshBin=Join-Path $env:WINDIR 'System32\OpenSSH'
     }
-    # Installation may create a broad port22 rule. This is a fresh server only.
-    Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Disable-NetFirewallRule | Out-Null
     Stop-Service sshd -ErrorAction Stop
     Set-Service sshd -StartupType Manual
-    $sshBin=Join-Path $env:WINDIR 'System32\OpenSSH'
     $sshd=Join-Path $sshBin 'sshd.exe'
     $keygen=Join-Path $sshBin 'ssh-keygen.exe'
     & $keygen -lf (Resolve-Path -LiteralPath $PublicKeyPath).Path | Out-Null
@@ -128,7 +184,7 @@ GatewayPorts no
 X11Forwarding no
 MaxAuthTries 3
 LoginGraceTime 20
-Subsystem sftp sftp-server.exe
+Subsystem sftp "$($sshBin.Replace('\','/'))/sftp-server.exe"
 "@ | Set-Content -LiteralPath $configPath -Encoding ASCII
     Protect-AdminFile $configPath
     $state.ConfigHash=(Get-FileHash -LiteralPath $configPath).Hash;Save-State
@@ -149,7 +205,7 @@ Subsystem sftp sftp-server.exe
 } catch {
     $problem=$_
     Get-NetFirewallRule -Name $rule -ErrorAction SilentlyContinue | Disable-NetFirewallRule -ErrorAction SilentlyContinue | Out-Null
-    Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Disable-NetFirewallRule -ErrorAction SilentlyContinue | Out-Null
+    if(-not $OpenSshArchive){Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Disable-NetFirewallRule -ErrorAction SilentlyContinue | Out-Null}
     if(Get-Service sshd -ErrorAction SilentlyContinue){Stop-Service sshd -ErrorAction SilentlyContinue;Set-Service sshd -StartupType Disabled -ErrorAction SilentlyContinue}
     if($state.AccountSID){Get-LocalUser -SID $state.AccountSID -ErrorAction SilentlyContinue | Disable-LocalUser -ErrorAction SilentlyContinue}
     Save-State

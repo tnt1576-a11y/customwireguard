@@ -1,6 +1,6 @@
 # Offline preflight fixtures. No accounts, services, firewall or network changes.
 [CmdletBinding()]
-param([switch]$CheckAcl)
+param([switch]$CheckAcl,[string]$OpenSshArchive='')
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $fixture=Join-Path $root ('test-output\remote-setup-'+[guid]::NewGuid().ToString('N'))
@@ -31,11 +31,14 @@ function Add-WindowsCapability {throw 'Unexpected Windows installation in prefli
 function New-LocalUser {throw 'Unexpected account mutation in preflight fixture'}
 function Set-Service {throw 'Unexpected service mutation in preflight fixture'}
 function New-NetFirewallRule {throw 'Unexpected firewall mutation in preflight fixture'}
-foreach($caseName in @('plan','controller','virtual','routed','existing','public-address','empty-ssh','empty-state','empty-both','ssh-files','state-files','hidden-file','unreadable','directory-link','file-at-directory')) {
+$cases=@('plan','controller','virtual','routed','existing','public-address','empty-ssh','empty-state','empty-both','ssh-files','state-files','hidden-file','unreadable','directory-link','file-at-directory','resume','resume-no-switch','resume-complete','resume-account','resume-other-host','resume-extra-file','resume-missing-fields','bad-archive')
+if($OpenSshArchive){$cases+='bundled-plan'}
+foreach($caseName in $cases) {
     $global:CwgRemoteFixtureCase=$caseName
     $caseRoot=Join-Path $fixture $caseName
     New-Item -ItemType Directory -Path $caseRoot | Out-Null
-    $source.Replace('$env:ProgramData',("'"+$caseRoot.Replace("'","''")+"'")) | Set-Content -LiteralPath $copy -Encoding UTF8
+    $caseSource=$source.Replace('$env:ProgramData',("'"+$caseRoot.Replace("'","''")+"'"))
+    $caseSource.Replace('$env:ProgramFiles',("'"+$caseRoot.Replace("'","''")+"'")) | Set-Content -LiteralPath $copy -Encoding UTF8
     $sshPath=Join-Path $caseRoot 'ssh'
     $statePath=Join-Path $caseRoot 'CWGRemoteTest'
     if($caseName -in @('empty-ssh','empty-both','ssh-files','hidden-file','unreadable')){New-Item -ItemType Directory -Path $sshPath | Out-Null}
@@ -53,6 +56,16 @@ foreach($caseName in @('plan','controller','virtual','routed','existing','public
         New-Item -ItemType Junction -Path $sshPath -Target $linkTarget | Out-Null
     }
     if($caseName -eq 'file-at-directory'){'ordinary file' | Set-Content -LiteralPath $sshPath}
+    if($caseName -like 'resume*'){
+        New-Item -ItemType Directory -Path $statePath | Out-Null
+        $saved=[ordered]@{Version=1;Computer=$env:COMPUTERNAME;TestAddress='10.20.30.100';ControllerAddress='10.20.30.10';Port=2222;Account='cwgtest';Rule='CWG-RemoteTest-SSH';Complete=$false;AccountSID='';ConfigHash='';KeyHash=''}
+        if($caseName -eq 'resume-complete'){$saved.Complete=$true}
+        if($caseName -eq 'resume-account'){$saved.AccountSID='S-1-5-21-1'}
+        if($caseName -eq 'resume-other-host'){$saved.Computer='different-test-host'}
+        if($caseName -eq 'resume-missing-fields'){$saved.Remove('KeyHash')}
+        if($caseName -eq 'resume-extra-file'){'unknown contents' | Set-Content -LiteralPath (Join-Path $statePath 'unknown.txt')}
+        $saved | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $statePath 'setup-state.json')
+    }
     $controller=if($caseName -eq 'public-address'){'203.0.113.10'}else{'10.20.30.10'}
     $expected=switch($caseName){
         'controller' {'This is the controller PC'}
@@ -66,12 +79,18 @@ foreach($caseName in @('plan','controller','virtual','routed','existing','public
         'unreadable' {'Fixture directory access denied'}
         'directory-link' {'Expected an ordinary directory'}
         'file-at-directory' {'Expected an ordinary directory'}
+        {$_ -like 'resume-*'} {'Existing files found in '+$statePath}
+        'bad-archive' {'archive hash does not match'}
     }
     $failure=$null
-    try { & $copy -ControllerAddress $controller -TestAddress '10.20.30.100' -PublicKeyPath $key -WhatIf } catch { $failure=$_.Exception.Message }
-    if($caseName -in @('plan','empty-ssh','empty-state','empty-both')) {if($failure){throw $failure}}
+    $extra=@{}
+    if($caseName -like 'resume*' -and $caseName -ne 'resume-no-switch'){$extra.ResumeFailedInstall=$true}
+    if($caseName -eq 'bad-archive'){$extra.OpenSshArchive=$key}
+    if($caseName -eq 'bundled-plan'){$extra.OpenSshArchive=$OpenSshArchive}
+    try { & $copy -ControllerAddress $controller -TestAddress '10.20.30.100' -PublicKeyPath $key -WhatIf @extra } catch { $failure=$_.Exception.Message }
+    if($caseName -in @('plan','empty-ssh','empty-state','empty-both','resume','bundled-plan')) {if($failure){throw $failure}}
     elseif(-not $failure -or -not $failure.Contains($expected)){throw "Wrong preflight failure for ${caseName}: $failure"}
-    if($caseName -ne 'state-files' -and (Test-Path (Join-Path $statePath 'setup-state.json'))){throw 'Preflight created setup state'}
+    if($caseName -ne 'state-files' -and $caseName -notlike 'resume*' -and (Test-Path (Join-Path $statePath 'setup-state.json'))){throw 'Preflight created setup state'}
     Write-Host "PASS: $caseName"
 }
 foreach($name in @('Setup-RemoteTestHost.ps1','Revoke-RemoteTestHost.ps1')) {
@@ -106,4 +125,38 @@ if($CheckAcl){
         if(@($rules | Where-Object InheritanceFlags -ne $wantedInheritance).Count){throw "Incorrect ACL inheritance: $path"}
     }
     Write-Host 'PASS: directory/file ACLs replace broad explicit grants with SYSTEM and Administrators only.'
+    Protect-AdminFile $aclRoot -AllowReadExecute
+    $readRules=@((Get-Acl -LiteralPath $aclRoot).GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+    $readRule=@($readRules | Where-Object {$_.IdentityReference.Value -eq 'S-1-5-11'})
+    if($readRules.Count -ne 3 -or $readRule.Count -ne 1 -or $readRule[0].FileSystemRights -ne 'ReadAndExecute, Synchronize' -or $readRule[0].InheritanceFlags -ne 'ContainerInherit, ObjectInherit'){throw 'Binary directory did not grant only read/execute to authenticated users'}
+    Write-Host 'PASS: standalone binary directory grants authenticated users read/execute only.'
+}
+if($OpenSshArchive){
+    # Validate the real executable and rendered setup configuration without
+    # installing services, opening a listener or generating system host keys.
+    $runtime=Join-Path $fixture 'runtime with spaces'
+    Expand-Archive -LiteralPath $OpenSshArchive -DestinationPath $runtime
+    $sshBin=Join-Path $runtime 'OpenSSH-Win64'
+    foreach($file in @(Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $sshBin -File | Where-Object Extension -in '.exe','.dll','.ps1','.psm1')){
+        $signature=Get-AuthenticodeSignature -LiteralPath $file.FullName
+        if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|,\s*)O=Microsoft Corporation(,|$)'){throw ('Invalid Microsoft signature: '+$file.Name)}
+    }
+    $hostKey=Join-Path $runtime 'test_host_key'
+    $keygenProcess=Start-Process -FilePath (Join-Path $sshBin 'ssh-keygen.exe') -ArgumentList ('-q -t ed25519 -N "" -f "'+$hostKey+'"') -WindowStyle Hidden -Wait -PassThru
+    if($keygenProcess.ExitCode -ne 0){throw 'Fixture host-key generation failed'}
+    $ControllerAddress='10.20.30.10';$TestAddress='10.20.30.100';$Port=2222;$account='cwgtest'
+    $template=[regex]::Match($source,'(?s)@"\r?\n(# Dedicated CWG test host.*?)\r?\n"@').Groups[1].Value
+    if(-not $template){throw 'Setup SSH configuration template not found'}
+    $config=$ExecutionContext.InvokeCommand.ExpandString($template)
+    $config=$config.Replace('HostKey __PROGRAMDATA__/ssh/ssh_host_ed25519_key',('HostKey "'+$hostKey.Replace('\','/')+'"'))
+    $configPath=Join-Path $runtime 'sshd_config'
+    $config | Set-Content -LiteralPath $configPath -Encoding ASCII
+    & (Join-Path $sshBin 'sshd.exe') -t -f $configPath
+    if($LASTEXITCODE -ne 0){throw 'Bundled sshd rejected setup configuration'}
+    $effective=& (Join-Path $sshBin 'sshd.exe') -T -f $configPath
+    if($LASTEXITCODE -ne 0){throw 'Bundled sshd effective configuration failed'}
+    foreach($setting in @('port 2222','passwordauthentication no','authenticationmethods publickey','allowusers cwgtest@10.20.30.10','allowtcpforwarding no','allowagentforwarding no')){
+        if($effective -notcontains $setting){throw "Effective configuration missing: $setting"}
+    }
+    Write-Host 'PASS: signed bundled sshd accepts the exact setup config and expected authentication settings; no listener was started.'
 }
