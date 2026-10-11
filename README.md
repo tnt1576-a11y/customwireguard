@@ -1,5 +1,11 @@
 # CWG: experimental UDP transport for WireGuard
 
+Version 0.6.1 adds **CWG.exe**, a Windows app with Full PC and both split-tunnel
+modes, automatic routing-engine setup, and private `.cwg` profile import.
+The fresh server installer offers optional Telegram setup; `/add name` creates
+and sends a separate user profile. See [desktop setup](docs/APPLICATION-CLIENT.md)
+and [Telegram commands](docs/TELEGRAM.md). Transport behavior is unchanged from 0.6.0.
+
 The current research path is a **client-driven encrypted UDP request/reply
 carrier**. It carries complete native WireGuard datagrams and remains UDP-only;
 there is no TCP fallback. Each authenticated request permits one same-sized
@@ -48,8 +54,9 @@ include and exclude rules, using a pinned local routing engine with the existing
 UDP carrier. The separate-PC tests include TCP/UDP, DNS, LAN access and failure
 recovery. Native CWG remains available; stop it before using app mode.
 Optional [Telegram management](docs/TELEGRAM.md) provides owner-only status,
-account creation/revocation and transport restart. It installs separately and
-starts only after the operator supplies a private token and enables it.
+account creation/revocation, private profile delivery and transport restart.
+The installer asks whether to enable it, then requests a private token and owner
+authorization. It remains optional.
 Version 0.5.0 adds optional adaptive request scheduling, a larger in-flight
 window, short native-data queue deadlines and sampled diagnostics. It preserves
 the same authenticated version-2 datagrams and one same-sized reply per request.

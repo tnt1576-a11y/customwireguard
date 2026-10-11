@@ -34,6 +34,7 @@ class Users(unittest.TestCase):
             z.writestr('cwg-client/unexpected-secret.txt', 'NEVER-EXPORT')
             z.writestr('cwg-client/scripts/Open-AppClient.ps1', 'public script')
             z.writestr('cwg-client/bin/cwg-windows-amd64.exe', 'public binary')
+            z.writestr('cwg-client/CWG.exe', 'desktop binary')
         owner = dict(enabled=True, slot=2, public_key='OWNER-PUBLIC', preshared_key='OWNER-PSK', config=server, export=str(root / 'client.zip'))
         state = dict(mode='multi', status='ready', listen_ip='192.0.2.10', endpoint='192.0.2.10:443', revision=1, users={'owner': owner}, files={})
         return state, SimpleNamespace(WG=wg)
@@ -45,6 +46,7 @@ class Users(unittest.TestCase):
             with patch.object(users, 'ROOT', root):
                 data = users.bundle(state, 3, 'BOB-OUTER', 'BOB-PRIVATE', 'BOB-PSK')
             with zipfile.ZipFile(io.BytesIO(data)) as z:
+                self.assertIn('cwg-client/CWG.exe', z.namelist())
                 combined = b''.join(z.read(name) for name in z.namelist())
                 for secret in (b'OWNER-OUTER', b'OWNER-PRIVATE', b'OWNER-PSK', b'SERVER-PRIVATE', b'NEVER-EXPORT'):
                     self.assertNotIn(secret, combined)

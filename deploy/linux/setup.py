@@ -31,7 +31,7 @@ UNIT = Path('/etc/systemd/system')
 UNITS = ('cwg.service', 'wg-quick@cwg0.service', 'cwg-guard.service')
 SCRIPTS = ('Start-Client.ps1', 'Stop-Client.ps1', 'WireGuard-Service.ps1', 'Diagnose-Client.ps1',
            'App-Tunnel.ps1', 'App-Tunnel.Common.ps1', 'App-EngineProcess.ps1',
-           'Open-AppClient.ps1', 'Install-AppEngine.ps1')
+           'Open-AppClient.ps1', 'Install-AppEngine.ps1', 'Desktop-Bridge.ps1', 'Import-CwgProfile.ps1')
 
 
 def run(*args, capture=False, check=True):
@@ -80,8 +80,10 @@ def release_files(release):
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
     if not arch:
         raise ValueError('This installer requires Linux amd64 or arm64.')
-    required = [f'bin/cwg-linux-{arch}', 'bin/cwg-windows-amd64.exe', 'deploy/linux/cwg.service',
+    required = [f'bin/cwg-linux-{arch}', 'bin/cwg-windows-amd64.exe', 'CWG.exe', 'deploy/linux/cwg.service',
                 'deploy/linux/cwg-multi.service', 'deploy/linux/users.py']
+    required += ['deploy/linux/' + name for name in ('telegram_admin.py', 'telegram_bot.py', 'telegram_helper.py',
+                 'cwg-telegram.service', 'cwg-telegram-admin.socket', 'cwg-telegram-admin@.service')]
     required += ['scripts/' + x for x in SCRIPTS]
     required += [x for x in hashes if x.startswith('THIRD-PARTY-LICENSES/')]
     if not any(x.startswith('THIRD-PARTY-LICENSES/') for x in required):
@@ -266,22 +268,25 @@ def export_client(state, release, verified):
         raise ValueError('Client export already exists.')
     with zipfile.ZipFile(path, 'x', compression=zipfile.ZIP_DEFLATED) as z:
         for name in verified:
-            if name == 'bin/cwg-windows-amd64.exe' or name.startswith(('scripts/', 'THIRD-PARTY-LICENSES/')):
+            if name in ('bin/cwg-windows-amd64.exe', 'CWG.exe') or name.startswith(('scripts/', 'THIRD-PARTY-LICENSES/')):
                 z.write(release / name, 'cwg-client/' + name)
         for name in ('client.json', 'cwg-test.conf', 'cwg-full.conf'):
             z.write(ROOT / 'generated' / name, 'cwg-client/config/' + name)
         z.writestr('cwg-client/CONNECT.txt', '''Keep this ZIP private; it contains this user's keys.
-Install official WireGuard Windows, extract this folder, then use Administrator PowerShell:
+Extract the complete folder and double-click CWG.exe. Accept the Windows
+administrator prompt. Choose Full PC or Split tunnel, then Connect.
+The routing engine is downloaded and checksum-verified on first use if absent.
+Import a .cwg file from your administrator to use another account.
+
+Optional legacy native mode (official WireGuard Windows required):
+Open Administrator PowerShell in this folder:
   .\\scripts\\Start-Client.ps1 -Bundle .\\config -Mode Test
   ping 10.77.0.1
   .\\scripts\\Stop-Client.ps1 -Bundle .\\config
 For IPv4 Internet access, start with -Mode Full instead.
 Stop with the same Stop-Client command. Public IPv6 is captured and rejected by
 the server; it does not fall back to the ISP while the Full tunnel is active.
-For application selection instead of the native Full tunnel:
-  .\\scripts\\Open-AppClient.ps1 -Bundle .\\config
-Click Install app engine once, choose programs or application folders, then Connect.
-The engine is downloaded from its official release and verified against pinned hashes.
+Full PC and application selection are both available in CWG.exe.
 All Windows DNS uses the tunnel while app mode runs. Selected public IPv6 is blocked;
 LAN access bypasses the tunnel. Stop native CWG before using app mode.
 There is no kill switch after removal. This export is one user's private identity;
@@ -463,6 +468,9 @@ def main():
     setup.add_argument('--release', required=True)
     setup.add_argument('--endpoint', required=True)
     setup.add_argument('--wan', required=True)
+    setup.add_argument('--telegram', choices=('ask', 'enabled', 'disabled'), default='ask')
+    setup.add_argument('--telegram-token-file', type=Path)
+    setup.add_argument('--telegram-owner', type=int)
     for command in ('verify', 'uninstall', 'remove-tables'):
         sub.add_parser(command)
     args = parser.parse_args()
@@ -478,6 +486,21 @@ def main():
             raise ValueError('Another CWG management operation is running.') from None
     if args.command == 'install':
         install(args)
+        # The VPN transaction is complete before optional management begins.
+        # Release its lock before starting a bot which can provision accounts.
+        lock.close()
+        source = Path(args.release).resolve() / 'deploy/linux/telegram_admin.py'
+        if source.is_file():
+            command = ['python3', str(source), 'configure', '--mode', args.telegram]
+            if args.telegram_token_file is not None:
+                command += ['--token-file', str(args.telegram_token_file)]
+            if args.telegram_owner is not None:
+                command += ['--owner-id', str(args.telegram_owner)]
+            result = run(*command, check=False)
+            if result.returncode:
+                raise ValueError('CWG is installed; optional Telegram setup did not complete. Run telegram_admin.py configure to retry.')
+        elif args.telegram == 'enabled':
+            raise ValueError('CWG is installed; Telegram setup files are missing from the release.')
     elif args.command == 'verify':
         state = read_state()
         if state['status'] != 'ready':

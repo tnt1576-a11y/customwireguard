@@ -140,7 +140,7 @@ def bundle(state, slot, secret, private_key, psk):
                 continue
             # The verified installer created this root-only template. Still use
             # an explicit public-file allowlist so exports cannot inherit keys.
-            if item.filename == 'cwg-client/CONNECT.txt' or item.filename == 'cwg-client/bin/cwg-windows-amd64.exe' or item.filename.startswith(('cwg-client/scripts/', 'cwg-client/THIRD-PARTY-LICENSES/')):
+            if item.filename in ('cwg-client/CONNECT.txt', 'cwg-client/CWG.exe', 'cwg-client/bin/cwg-windows-amd64.exe') or item.filename.startswith(('cwg-client/scripts/', 'cwg-client/THIRD-PARTY-LICENSES/')):
                 z.writestr(item.filename, template.read(item))
         for name, data in replacements.items():
             z.writestr('cwg-client/config/' + name, data)

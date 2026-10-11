@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Optional unprivileged, owner-only Telegram control client."""
+import base64
 import http.client
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import socket
 import ssl
 import sys
@@ -12,7 +14,7 @@ import tempfile
 import time
 
 MAX_RESPONSE = 1 << 20
-HELP = 'CWG commands: /status, /users, /add NAME, /revoke NAME, /restart, /help. Private bundles stay on the server.'
+HELP = ('CWG management\n/status - server health\n/users - list accounts\n/add alice - create a user and send their configuration\n/config alice - resend an active user configuration\n/revoke alice - disable a user\n/restart - restart transport\n/help - this menu\n\nImport the .cwg file in the CWG Windows app. Only this private owner chat can manage users. Configuration files contain private keys; share each only with its intended user.')
 
 
 class APIError(Exception):
@@ -67,6 +69,26 @@ class Telegram:
         finally:
             conn.close()
 
+    def document(self, owner, filename, data, caption):
+        if not re.fullmatch(r'[a-z][a-z0-9_-]{0,31}\.cwg', filename) or not 0 < len(data) <= 8192:
+            raise ValueError('Invalid private profile')
+        boundary = 'cwg' + secrets.token_hex(24)
+        body = bytearray()
+        for name, value in [('chat_id', str(owner)), ('caption', caption[:1000])]:
+            body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
+        body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{filename}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode())
+        body.extend(data); body.extend(f'\r\n--{boundary}--\r\n'.encode())
+        conn = self.connection()
+        try:
+            conn.request('POST', '/bot' + self.token + '/sendDocument', bytes(body), {'Content-Type': 'multipart/form-data; boundary=' + boundary})
+            response = conn.getresponse(); raw = response.read(MAX_RESPONSE + 1)
+            if len(raw) > MAX_RESPONSE or response.status != 200 or json.loads(raw).get('ok') is not True:
+                raise APIError()
+        except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException):
+            raise APIError() from None
+        finally:
+            conn.close()
+
 
 def atomic_state(path, value):
     path = Path(path)
@@ -106,7 +128,7 @@ def command(update, cfg, now):
         return {'action': 'help'}
     if text in ('/status', '/users', '/restart'):
         return {'action': text[1:]}
-    match = re.fullmatch(r'/(add|revoke) ([a-z][a-z0-9_-]{0,31})', text)
+    match = re.fullmatch(r'/(add|revoke|config) ([a-z][a-z0-9_-]{0,31})', text)
     if match:
         return {'action': match[1], 'name': match[2]}
     return {'action': 'help'}
@@ -128,6 +150,14 @@ def management(request):
         result = json.loads(data)
         if not isinstance(result.get('text'), str) or len(result['text']) > 3500:
             raise ValueError('Invalid management response')
+        if 'document' in result:
+            doc = result['document']
+            if not isinstance(doc, dict) or set(doc) != {'name', 'base64'} or not isinstance(doc['name'], str) or not re.fullmatch(r'[a-z][a-z0-9_-]{0,31}\.cwg', doc['name']):
+                raise ValueError('Invalid profile response')
+            raw = base64.b64decode(doc['base64'], validate=True)
+            if not 0 < len(raw) <= 8192:
+                raise ValueError('Invalid profile size')
+            return result
         return result['text']
 
 
@@ -172,8 +202,12 @@ class Bot:
                     text = self.manager(action)
                 except (OSError, ValueError):
                     text = 'Management reply unavailable. Check server state before retrying; the action may have completed.'
-            self.api.call('sendMessage', {'chat_id': self.cfg['owner_id'], 'text': text,
-                                          'protect_content': True})
+            if isinstance(text, dict) and 'document' in text:
+                doc = text['document']
+                self.api.document(self.cfg['owner_id'], doc['name'], base64.b64decode(doc['base64'], validate=True), text['text'])
+            else:
+                self.api.call('sendMessage', {'chat_id': self.cfg['owner_id'], 'text': text,
+                                              'protect_content': True})
 
 
 def main():

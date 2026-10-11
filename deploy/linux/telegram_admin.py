@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Install optional Telegram support after a managed CWG server is ready."""
 import argparse
+import getpass
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import stat
 import subprocess
 import sys
 import time
+import tempfile
 
 sys.dont_write_bytecode = True
 ROOT = Path('/etc/cwg-telegram')
@@ -181,6 +184,96 @@ def identify(token_file):
     print('Use your own ID with install --owner-id. If empty or ambiguous, send /start to your dedicated bot and repeat; do not guess.')
 
 
+def pair_owner(api, username, duration=120):
+    """Prove possession of a one-time setup code, never trust the first sender."""
+    nonce = 'cwg_' + secrets.token_urlsafe(24)
+    started, deadline, offset = int(time.time()), time.monotonic() + duration, 0
+    print('Open this one-time link from your own Telegram account and press Start:')
+    print(f'https://t.me/{username}?start={nonce}', flush=True)
+    while time.monotonic() < deadline:
+        updates = api.call('getUpdates', {'offset': offset, 'limit': 20, 'timeout': 10, 'allowed_updates': ['message']})
+        if not isinstance(updates, list) or len(updates) > 20:
+            raise ValueError('Invalid pairing response')
+        for row in updates:
+            if not isinstance(row, dict) or type(row.get('update_id')) is not int:
+                continue
+            offset = max(offset, row['update_id'] + 1)
+            msg = row.get('message', {})
+            if not isinstance(msg, dict) or 'forward_origin' in msg:
+                continue
+            chat, sender = msg.get('chat', {}), msg.get('from', {})
+            if not isinstance(chat, dict) or not isinstance(sender, dict):
+                continue
+            owner, date = sender.get('id'), msg.get('date')
+            if (type(owner) is int and 0 < owner < 1 << 52 and sender.get('is_bot') is False
+                    and chat.get('type') == 'private' and chat.get('id') == owner
+                    and type(date) is int and date >= max(started, int(time.time()) - 60)
+                    and date <= int(time.time()) + 5 and msg.get('text') == '/start ' + nonce):
+                return owner
+    raise ValueError('Pairing timed out; no owner was authorized')
+
+
+def configure(mode='ask', token_file=None, owner=None):
+    """Interactive optional setup; failure never tears down a working VPN."""
+    if mode == 'ask':
+        if not sys.stdin.isatty():
+            print('Non-interactive install: Telegram unchanged. Use --telegram enabled with --telegram-token-file and --telegram-owner.')
+            return
+        choice = input('Enable Telegram management? [y/N]: ').strip().lower()
+        if choice not in ('', 'y', 'yes', 'n', 'no'):
+            raise ValueError('Choose yes or no')
+        mode = 'enabled' if choice in ('y', 'yes') else 'disabled'
+    if mode == 'disabled':
+        if STATE.exists():
+            verify(read_state()); disable()
+        print('Telegram management is disabled. CWG remains available.')
+        return
+    if STATE.exists():
+        state = read_state(); verify(state)
+        previous = json.loads((ROOT / 'bot.json').read_text())
+        if owner is not None and previous['owner_id'] != owner:
+            raise ValueError('Existing bot owner differs; inspect before replacing it')
+        if token_file is not None:
+            protected(token_file, 0o600)
+            with Path(token_file).open('r') as stream:
+                token = stream.read(8193).strip()
+            if not secrets.compare_digest(previous['token'], token):
+                raise ValueError('Existing bot token differs; inspect before replacing it')
+        enable(state)
+        return
+    temporary = None
+    try:
+        if token_file is None:
+            if not sys.stdin.isatty():
+                raise ValueError('Provide a protected token file for non-interactive setup')
+            token = getpass.getpass('Bot token (hidden): ').strip()
+            fd, name = tempfile.mkstemp(prefix='.cwg-telegram-token-', dir='/root')
+            temporary = Path(name)
+            with os.fdopen(fd, 'w') as stream:
+                stream.write(token + '\n'); stream.flush(); os.fsync(stream.fileno())
+            token_file = temporary
+        protected(token_file, 0o600)
+        with Path(token_file).open('r') as stream:
+            token = stream.read(8193).strip()
+        if not re.fullmatch(r'[0-9]{5,16}:[A-Za-z0-9_-]{30,100}', token):
+            raise ValueError('Invalid token')
+        api = module('telegram_bot').Telegram(token)
+        identity = api.call('getMe', {})
+        username = identity.get('username', '')
+        if identity.get('is_bot') is not True or not re.fullmatch(r'[A-Za-z0-9_]{5,32}', username) or api.call('getWebhookInfo', {}).get('url'):
+            raise ValueError('Use a dedicated bot without an existing webhook')
+        if owner is None:
+            if not sys.stdin.isatty():
+                raise ValueError('Provide the numeric owner ID for non-interactive setup')
+            value = input('Your numeric Telegram user ID (Enter to pair by a one-time link): ').strip()
+            owner = int(value) if value else pair_owner(api, username)
+        install(owner, token_file); enable(read_state())
+        print(f'Telegram ready: https://t.me/{username} (authorized owner {owner}). Send /start for commands.')
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def enable(state):
     verify(state); managed_server()
     if state['status'] != 'ready':
@@ -240,6 +333,8 @@ def main():
     sub = parser.add_subparsers(dest='action', required=True)
     create = sub.add_parser('install'); create.add_argument('--owner-id', type=int, required=True); create.add_argument('--token-file', type=Path, required=True)
     lookup = sub.add_parser('identify'); lookup.add_argument('--token-file', type=Path, required=True)
+    wizard = sub.add_parser('configure'); wizard.add_argument('--mode', choices=('ask', 'enabled', 'disabled'), default='ask')
+    wizard.add_argument('--token-file', type=Path); wizard.add_argument('--owner-id', type=int)
     for name in ('verify', 'enable', 'disable', 'uninstall'):
         sub.add_parser(name)
     args = parser.parse_args()
@@ -249,7 +344,9 @@ def main():
     os.umask(0o077)
     with open('/run/lock/cwg-telegram-install.lock', 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if args.action == 'identify':
+        if args.action == 'configure':
+            configure(args.mode, args.token_file, args.owner_id)
+        elif args.action == 'identify':
             identify(args.token_file)
         elif args.action == 'install':
             install(args.owner_id, args.token_file)

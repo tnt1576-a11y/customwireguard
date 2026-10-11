@@ -1344,5 +1344,46 @@ three independent authenticated preflights, account limits/revocation, private
 Windows export boundaries, preserved larger UDP socket limits and optional-bot
 uninstall boundaries. Twenty-three portable installer/account/Telegram checks
 passed. Full Go vet/tests and real IPv4/IPv6 WireGuard tests passed before build.
-Optional Telegram's real systemd/management/lifecycle/resource tests used a
-local TLS API fixture; actual Telegram delivery remains untested and disabled.
+Optional Telegram's original systemd/management/lifecycle/resource tests used a
+local TLS API fixture. Subsequent live delivery is documented below.
+
+## 0.6.1 desktop and live Telegram (2026-10-11)
+
+The Windows desktop app adds Full PC, Include and Exclude choices, saved executable
+and folder rules, profile import, automatic pinned engine setup, and tray controls.
+It uses the 0.6 transport without changing its pacing or packet format. The Linux
+transport remained 0.6.0 during these compatibility checks.
+
+On the separate Windows 10 PC, a private driver loaded the compiled app and
+invoked its real import bridge, radio controls and Connect/Disconnect events.
+The first driver incorrectly expected synchronous startup and stopped at
+Connecting; independent SYSTEM cleanup restored networking. After correcting the
+driver to wait for Running, profile import, automatic offline engine installation,
+saved rules, all three routing choices and LAN access passed:
+
+| Mode | Selected program | Other program | UDP received | Median / p95 ms |
+|---|---|---|---|---|
+| Full PC | Server egress | Server egress | 160/160 | 93.4 / 102.4 |
+| Only selected apps | Server egress | Direct egress | 160/160 | 103.8 / 111.4 |
+| Selected apps bypass | Direct egress | Server egress | 159/160 | 100.8 / 110.2 |
+
+These are short functional trials, not evidence that residual transport loss or
+future DPI blocking is solved. The exact carrier SHA-256 was
+`7f666ad15348e88ea860534ee802051c722e1f0195d16b75a69789b6fdbdf653`.
+The app's later preview-only DPI correction and version metadata were checked
+offline. Cleanup verified the original default gateway, DNS and IPv6 binding,
+removed test tasks and stopped the tunnel. The temporary account was revoked.
+
+The owner confirmed live bot `/start` and `/status` replies. The real restricted
+helper created a separate test account and returned a data-only profile; the app
+imported it for the routing tests. Actual Telegram `sendDocument` then delivered
+the owner's profile to the configured private owner chat. No server key or bot
+token is exported. The source and public packages contain no live credentials.
+
+A fresh isolated Debian 13 installation passed release verification, the optional
+Telegram-disabled path, GUI exports for both owner and new users, repeat setup,
+revocation and clean uninstall. The container had independent networking and a
+time limit and was stopped afterward. Portable Python tests passed 29 cases;
+profile import tests passed under PowerShell 5.1 and 7, covering data-only
+whitelisting, traversal/duplicate/oversize rejection, private ACLs, malformed
+directives and failed-import cleanup. Go module verification, vet and tests passed.

@@ -8,17 +8,18 @@ The server-side transport and credentials are unchanged.
 
 ## Open the controls
 
-Extract the private client bundle. From its folder in Administrator PowerShell:
+Extract the complete Windows app folder and double-click **CWG.exe**. Accept
+Windows' administrator prompt. No terminal commands are needed. The private
+owner package already has a profile; other users click **Import configuration**
+and select the `.cwg` file supplied by their administrator through the bot.
 
-```powershell
-.\scripts\Open-AppClient.ps1 -Bundle .\config
-```
-
-1. Click **Install app engine** once. The installer downloads the official x64
-   release and checks both the archive and executable against pinned SHA-256
-   values. It installs no permanent filtering service during this step.
-2. Select **Only these apps use CWG**, **These apps bypass CWG**, or **All apps use
-   CWG**. Add programs or application folders, then click **Connect**.
+1. Choose **Full PC** to tunnel all apps, or **Split tunnel** with **Only these
+   apps use CWG** or **These apps bypass CWG**. Add executables or installation
+   folders. Your choices are saved with the profile.
+2. Click **Connect**. On first use the app installs the official routing engine
+   automatically, checking archive and executable SHA-256 against pinned values.
+   Bundles containing `engine/sing-box-1.14.3-windows-amd64.zip` work without a
+   download. No permanent filtering service is installed in this step.
 3. Restart applications whose existing connections need to move. A folder rule
    includes executables in its subfolders; an individual program rule covers
    that executable only. Add separately installed launchers/helpers separately.
@@ -26,8 +27,8 @@ Extract the private client bundle. From its folder in Administrator PowerShell:
    connected leaves CWG running in the notification area. Its tray menu can open
    the controls, disconnect, or disconnect and quit.
 
-If GitHub is inaccessible on that PC, obtain the official archive on another PC,
-transfer it locally, and install it without network access:
+If GitHub is inaccessible, obtain the official archive on another PC and put it
+in the app's `engine` folder before clicking Connect. Advanced manual setup:
 
 ```powershell
 .\scripts\Install-AppEngine.ps1 -ArchivePath C:\Downloads\sing-box-1.14.3-windows-amd64.zip
@@ -36,6 +37,12 @@ transfer it locally, and install it without network access:
 The installer performs the same pinned checks for offline input. An already
 installed matching engine is verified and reused. A different existing engine
 is refused. Failed downloads remain in a staging folder under `bin` for inspection.
+
+Keep `CWG.exe`, `scripts` and `bin` together. The executable checks embedded
+helper hashes before importing or connecting; do not mix releases. Imported
+profiles contain only bounded data and have private Windows permissions.
+The app requires 64-bit Windows 10/11 and .NET Framework 4.8. The legacy
+`Open-AppClient.ps1` controls remain available for existing automation.
 
 ## Routing behavior
 

@@ -62,17 +62,24 @@ rather than falling back to the client's physical Internet connection.
 
 ## Give the client its private package
 
-Optional owner-only Telegram management is installed separately after server
-verification. See [Telegram setup](TELEGRAM.md); no bot/token is enabled by this
-installer. Remove that component before uninstalling the main server.
+After server verification, interactive setup asks whether to enable Telegram.
+Choose yes to enter a hidden token and authorize your owner account, or no to
+leave it disabled. Noninteractive runs leave it unchanged unless explicitly
+configured. See [Telegram setup](TELEGRAM.md) for flags and user provisioning.
+Remove that component before uninstalling the main server.
 
 The result is `/etc/cwg/client.zip`, readable only by root. Copy it securely to
 the intended Windows computer; do not publish it or commit it to GitHub. It
 contains that client's keys, the verified Windows executable and start/stop
 helpers. It excludes the server's WireGuard private key and installation state.
 
-Install the official WireGuard Windows client, extract the ZIP, then open
-Administrator PowerShell in the extracted `cwg-client` directory:
+Extract the private ZIP and double-click **CWG.exe**. Choose Full PC or Split
+tunnel and click Connect. It installs its verified routing engine on first use;
+WireGuard Windows and WireSock are not required. New users can instead import a
+`.cwg` document from the bot into the public Windows app package.
+
+For the older native integration, install WireGuard Windows and use elevated
+PowerShell in the extracted `cwg-client` directory:
 
 ```powershell
 .\scripts\Start-Client.ps1 -Bundle .\config -Mode Test
@@ -87,9 +94,8 @@ The probe checks the outer transport; the ping verifies WireGuard and the final
 request verifies Internet forwarding. Full mode requires a physical route to
 the server. Stop other VPNs before trying it. Stopping CWG removes the tunnel;
 the helper does not provide a persistent kill switch. The export also includes
-the [application-selection GUI](APPLICATION-CLIENT.md): stop native CWG, run
-`.\scripts\Open-AppClient.ps1 -Bundle .\config`, install its pinned app engine,
-and select programs or folders before connecting.
+the [desktop app](APPLICATION-CLIENT.md): stop native CWG, open `CWG.exe`, and
+select programs or folders before connecting.
 
 ## Verify, repeat and recover
 

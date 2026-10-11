@@ -22,9 +22,12 @@ python3 /usr/local/lib/cwg/users.py add bob
 The resulting files are `/etc/cwg/user-alice.zip` and
 `/etc/cwg/user-bob.zip`. Copy each ZIP securely to its intended person. These
 files contain client private keys; never publish them or put them in GitHub.
-They contain the app-selection GUI and the native Windows helpers. The GUI's
-pinned routing engine is installed separately using its Install app engine
-button. See [application client instructions](APPLICATION-CLIENT.md).
+They contain `CWG.exe` and the native Windows helpers. The desktop app installs
+its pinned routing engine automatically on first Connect. See [application client
+instructions](APPLICATION-CLIENT.md). With the optional bot enabled, `/add alice`
+creates the same independent account and sends a small `alice.cwg` document to
+the owner. Share that file and the public Windows app ZIP with Alice; they import
+the file in the app. `/config alice` resends it; `/revoke alice` disables it.
 
 Use one account for each simultaneous device. The fourth active account is
 refused. Names are lowercase identifiers, up to 32 characters, beginning with a

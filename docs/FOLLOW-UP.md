@@ -24,10 +24,10 @@ the controller's VPN, routes and adapters are never changed for testing.
   keys, three active accounts, hot provisioning/revocation, private exports,
   bounded fair scheduling, and durable interrupted-operation recovery.
 - [Optional Telegram management](TELEGRAM.md): private owner authorization,
-  status/users/add/revoke/restart commands, bounded resources and polling,
+  status/users/add/config/revoke/restart commands, profile delivery, bounded polling,
   unprivileged bot plus restricted helper, and clean removal. It stays off until
-  the operator supplies a private token and enables it. Real service and account
-  tests used a local TLS fixture; no real Telegram delivery is claimed.
+  the operator supplies a private token and enables it. Systemd lifecycle tests
+  used a local TLS fixture; the owner later confirmed live bot replies.
 
 ## Practical limits
 

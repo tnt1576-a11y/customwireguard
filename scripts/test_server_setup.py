@@ -37,7 +37,7 @@ class InstallerGuards(unittest.TestCase):
             for name in ('client.json', 'cwg-test.conf', 'cwg-full.conf'):
                 (root / 'generated' / name).write_text('client fixture')
             (root / 'generated' / 'cwg0.conf').write_text('SERVER-PRIVATE-KEY-FIXTURE')
-            verified = ['bin/cwg-windows-amd64.exe', 'THIRD-PARTY-LICENSES/Go.txt']
+            verified = ['CWG.exe', 'bin/cwg-windows-amd64.exe', 'THIRD-PARTY-LICENSES/Go.txt']
             verified += ['scripts/' + name for name in setup.SCRIPTS]
             for name in verified:
                 path = release / name
@@ -47,6 +47,8 @@ class InstallerGuards(unittest.TestCase):
                 setup.export_client({'files': {}}, release, verified)
             with zipfile.ZipFile(root / 'client.zip') as z:
                 names = set(z.namelist())
+                self.assertIn('cwg-client/CWG.exe', names)
+                self.assertIn('cwg-client/scripts/Desktop-Bridge.ps1', names)
                 self.assertIn('cwg-client/scripts/Open-AppClient.ps1', names)
                 self.assertIn('cwg-client/scripts/App-EngineProcess.ps1', names)
                 self.assertIn('cwg-client/config/cwg-full.conf', names)
@@ -82,7 +84,8 @@ class InstallerGuards(unittest.TestCase):
     def test_release_corruption_and_path_traversal_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            names = ['bin/cwg-linux-amd64', 'bin/cwg-windows-amd64.exe', 'deploy/linux/cwg.service', 'deploy/linux/cwg-multi.service', 'deploy/linux/users.py', 'THIRD-PARTY-LICENSES/Go.txt']
+            names = ['CWG.exe', 'bin/cwg-linux-amd64', 'bin/cwg-windows-amd64.exe', 'deploy/linux/cwg.service', 'deploy/linux/cwg-multi.service', 'deploy/linux/users.py', 'THIRD-PARTY-LICENSES/Go.txt']
+            names += ['deploy/linux/' + name for name in ('telegram_bot.py', 'telegram_helper.py', 'telegram_admin.py', 'cwg-telegram.service', 'cwg-telegram-admin.socket', 'cwg-telegram-admin@.service')]
             names += ['scripts/' + name for name in setup.SCRIPTS]
             entries = []
             for name in names:

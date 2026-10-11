@@ -1,10 +1,14 @@
 """Portable Telegram authorization, replay and command-boundary tests."""
 import copy
+import base64
+import hashlib
 import importlib.util
 import json
 import io
 from pathlib import Path
 import tempfile
+import stat
+import zipfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -38,6 +42,9 @@ class API:
             return self.updates
         self.sent.append(body)
         return {}
+
+    def document(self, owner, filename, data, caption):
+        self.sent.append({'chat_id': owner, 'filename': filename, 'data': data, 'caption': caption})
 
 
 class TelegramBoundaries(unittest.TestCase):
@@ -133,11 +140,90 @@ class TelegramBoundaries(unittest.TestCase):
                 helper.execute({'action': 'restart'})
             run.assert_not_called()
         ready = {'mode': 'multi', 'status': 'ready'}
-        with patch.object(helper, 'private_json', return_value=ready), patch.object(helper, 'run', return_value='') as run:
+        with patch.object(helper, 'private_json', return_value=ready), patch.object(helper, 'run', return_value='') as run, \
+                patch.object(helper, 'client_profile', return_value={'text': 'Private profile', 'document': {}}) as export:
             result = helper.execute({'action': 'add', 'name': 'alice'})
             run.assert_called_once_with('/usr/bin/python3', str(helper.PROGRAM / 'users.py'), 'add', 'alice')
-            self.assertIn('/etc/cwg/user-alice.zip', result)
-            self.assertNotIn('PrivateKey', result)
+            export.assert_called_once_with('alice')
+            self.assertIn('document', result)
+
+    def test_private_document_only_to_authorized_owner(self):
+        with tempfile.TemporaryDirectory() as temp:
+            api = API([update(text='/config alice')])
+            profile = {'text': 'Private', 'document': {'name': 'alice.cwg', 'base64': base64.b64encode(b'profile').decode()}}
+            worker = bot.Bot(CFG, Path(temp) / 'offset.json', api, lambda request: profile, lambda: 1000)
+            worker.poll()
+            self.assertEqual(api.sent[0]['chat_id'], 123456)
+            self.assertEqual(api.sent[0]['data'], b'profile')
+            self.assertEqual(bot.command(update(text='/config ../alice'), CFG, 1000), {'action': 'help'})
+
+    def test_document_multipart_bounds_and_secret_safe_failure(self):
+        class Connection:
+            status = 200
+            def request(self, method, path, body, headers): self.body, self.headers = body, headers
+            def getresponse(self): return self
+            def read(self, limit): return b'{"ok":true,"result":{}}'
+            def close(self): self.closed = True
+        connection = Connection()
+        api = bot.Telegram('fixture-token', lambda: connection)
+        api.document(123456, 'alice.cwg', b'PRIVATE-PROFILE', 'For Alice')
+        self.assertIn(b'name="chat_id"\r\n\r\n123456', connection.body)
+        self.assertIn(b'filename="alice.cwg"', connection.body)
+        self.assertIn(b'PRIVATE-PROFILE', connection.body)
+        self.assertNotIn(b'fixture-token', connection.body)
+        self.assertTrue(connection.closed)
+        for name, content in [('../alice.cwg', b'x'), ('alice.cwg', b'x' * 8193), ('alice.cwg', b'')]:
+            with self.assertRaises(ValueError): api.document(123456, name, content, '')
+        connection.status = 500
+        with self.assertRaises(bot.APIError) as error: api.document(123456, 'alice.cwg', b'x', '')
+        self.assertNotIn('fixture-token', str(error.exception))
+
+    def test_repeat_configuration_preserves_identity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); token = root / 'token'; token.write_text('123456:' + 'A' * 35)
+            (root / 'bot.json').write_text(json.dumps({'owner_id': 123456, 'token': token.read_text()}))
+            (root / 'install-state.json').write_text('{}')
+            with patch.object(admin, 'ROOT', root), patch.object(admin, 'STATE', root / 'install-state.json'), \
+                    patch.object(admin, 'read_state', return_value={}), patch.object(admin, 'verify'), \
+                    patch.object(admin, 'protected'), patch.object(admin, 'enable') as enable:
+                admin.configure('enabled', token, 123456)
+                enable.assert_called_once()
+                enable.reset_mock()
+                with self.assertRaises(ValueError): admin.configure('enabled', token, 999)
+                token.write_text('123456:' + 'B' * 35)
+                with self.assertRaises(ValueError): admin.configure('enabled', token, 123456)
+                enable.assert_not_called()
+
+    def test_export_contains_only_requested_active_client_data(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); archive = root / 'user-alice.zip'
+            with zipfile.ZipFile(archive, 'w') as z:
+                for name in ['client.json', 'cwg-full.conf', 'cwg-test.conf']:
+                    z.writestr('cwg-client/config/' + name, 'ALICE-PRIVATE')
+                z.writestr('server.json', 'SERVER-PRIVATE')
+                z.writestr('cwg-client/bin/not-a-config.exe', 'PROGRAM')
+            state = {'users': {'alice': {'enabled': True}}, 'files': {str(archive): hashlib.sha256(archive.read_bytes()).hexdigest()}}
+            info = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_size=archive.stat().st_size)
+            with patch.object(helper, 'ROOT', root), patch.object(helper, 'private_json', return_value=state), patch.object(Path, 'lstat', return_value=info):
+                result = helper.client_profile('alice')
+                with zipfile.ZipFile(io.BytesIO(base64.b64decode(result['document']['base64']))) as z:
+                    self.assertEqual(set(z.namelist()), {'client.json', 'cwg-full.conf', 'cwg-test.conf', 'profile.json'})
+                    self.assertFalse(any(b'SERVER-PRIVATE' in z.read(n) or b'PROGRAM' in z.read(n) for n in z.namelist()))
+                state['users']['alice']['enabled'] = False
+                with self.assertRaises(ValueError): helper.client_profile('alice')
+
+    def test_pairing_rejects_first_sender_without_one_time_code(self):
+        wrong = update(text='/start')
+        right = update(2, '/start cwg_FIXED')
+        api = API([wrong, right])
+        with patch.object(admin.secrets, 'token_urlsafe', return_value='FIXED'), patch.object(admin.time, 'time', return_value=1000), patch('sys.stdout', new_callable=io.StringIO):
+            self.assertEqual(admin.pair_owner(api, 'fixturebot'), 123456)
+        self.assertEqual(api.sent, [])
+
+    def test_noninteractive_optional_setup_does_not_prompt_or_change_services(self):
+        with patch.object(admin.sys.stdin, 'isatty', return_value=False), patch.object(admin, 'disable') as disable, patch.object(admin, 'enable') as enable, patch('sys.stdout', new_callable=io.StringIO):
+            admin.configure('ask')
+            disable.assert_not_called(); enable.assert_not_called()
 
     def test_identity_lookup_never_authorizes_or_sends_a_message(self):
         with tempfile.TemporaryDirectory() as temp:
