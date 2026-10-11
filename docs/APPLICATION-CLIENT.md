@@ -44,6 +44,13 @@ profiles contain only bounded data and have private Windows permissions.
 The app requires 64-bit Windows 10/11 and .NET Framework 4.8. The legacy
 `Open-AppClient.ps1` controls remain available for existing automation.
 
+The compact shareable Windows ZIP includes the verified engine ready to run in
+`bin/app-engine`; it needs no first-use download or extraction. It keeps only the
+desktop executable, carrier, engine, required helpers, short instructions and
+checksums. Dependency notices are combined in `THIRD-PARTY-NOTICES.txt`.
+Build this package with `scripts/Package-Desktop.ps1 -Release RELEASE_FOLDER
+-EngineArchive OFFICIAL_ENGINE_ZIP -Destination NEW_OUTPUT_FOLDER`.
+
 ## Routing behavior
 
 - Selected application TCP and UDP connections enter the native WireGuard
