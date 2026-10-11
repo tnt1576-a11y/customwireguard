@@ -14,6 +14,21 @@ spec.loader.exec_module(setup)
 
 
 class InstallerGuards(unittest.TestCase):
+    def test_socket_limits_match_requests_without_reducing_larger_limits(self):
+        def observed(*args, **kwargs):
+            value = 212992 if args[-1] == 'net.core.rmem_max' else 7340032
+            return subprocess.CompletedProcess(args, 0, stdout=str(value) + '\n')
+        with patch.object(setup, 'run', side_effect=observed):
+            settings = setup.socket_buffer_settings()
+        self.assertEqual(settings, 'net.core.rmem_max=2097152\nnet.core.wmem_max=7340032\n')
+
+    def test_server_removal_refuses_an_installed_management_bot(self):
+        with patch.object(setup, 'Path') as path, patch.object(setup, 'stop_owned') as stop:
+            path.return_value.exists.return_value = True
+            with self.assertRaisesRegex(ValueError, 'Telegram'):
+                setup.uninstall()
+            stop.assert_not_called()
+
     def test_client_export_has_app_controls_without_server_keys(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

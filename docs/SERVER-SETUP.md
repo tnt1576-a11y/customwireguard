@@ -7,12 +7,10 @@ container with real kernel WireGuard; arm64 is cross-compiled, not runtime teste
 
 This is a **fresh installation**, not an upgrade command for an existing CWG
 server. It refuses existing CWG files, reserved ports, firewall tables and
-overlapping tunnel networks before touching them. The 0.6 development revision
+overlapping tunnel networks before touching them. The 0.6 installer
 creates an initial `owner` account and supports separate named accounts; see
 [multi-user status and provisioning](MULTI-USER.md). Coordinated rates and a loaded
-three-user WAN comparison have passed; final release deployment is pending.
-Use matching 0.6 binaries and source;
-the published 0.5.8 installer remains the verified single-client release.
+three-user WAN comparison have passed. Use matching 0.6 binaries and source.
 Do not share one account's ZIP between simultaneous users.
 
 ## Install
@@ -49,6 +47,11 @@ CWG binds to the selected WAN's local IPv4 address, using the public endpoint
 when that address is local. This also supports a public address translated by a
 provider to the WAN's private address. A later WAN address change requires
 configuration work; the installer does not automatically migrate an installation.
+
+The installer sets UDP send/receive buffer ceilings to at least 2 MiB, matching
+the transport's socket requests, and preserves larger existing host limits.
+It records previous values for install-failure rollback. Uninstall removes CWG's
+persistent settings file and leaves live networking values for other services.
 
 The native WireGuard backend is UDP 51820 and is blocked on non-loopback
 interfaces. Tunnel networks are `10.77.0.0/24` and `fd77:77:77::/64`. The generated

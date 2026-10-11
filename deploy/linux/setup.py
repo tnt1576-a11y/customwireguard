@@ -142,6 +142,18 @@ WantedBy=multi-user.target
     return rules, sysctl, guard
 
 
+def socket_buffer_settings():
+    # Linux can silently cap SO_RCVBUF/SO_SNDBUF while the Go setters succeed.
+    # Match the transport's 2 MiB request and preserve larger host-wide limits.
+    settings = ''
+    for name in ('net.core.rmem_max', 'net.core.wmem_max'):
+        current = int(run('sysctl', '-n', name, capture=True).stdout.strip())
+        if current <= 0:
+            raise ValueError('Invalid UDP socket buffer limit.')
+        settings += f'{name}={max(current, 2 << 20)}\n'
+    return settings
+
+
 def owned_path(path):
     p = PurePosixPath(str(path))
     fixed = ('/usr/local/lib/cwg/cwg', '/usr/local/lib/cwg/server-admin.py', '/usr/local/lib/cwg/users.py',
@@ -329,6 +341,7 @@ def install(args):
         if run('nft', 'list', 'table', family, name, capture=True, check=False).returncode == 0:
             raise ValueError('Reserved CWG firewall table already exists.')
     rules, settings, guard = network_files(wan, int(ep.rsplit(':', 1)[1]))
+    settings += socket_buffer_settings()
     applied = dict(line.split('=', 1) for line in settings.splitlines())
     before = {k: run('sysctl', '-n', k, capture=True).stdout.strip() for k in applied}
     state = dict(schema=1, status='installing', endpoint=ep, wan=wan, listen_ip=listen_ip, binary_sha256=digest(release / executable),
@@ -440,7 +453,7 @@ def uninstall():
         except KeyError:
             pass
     print('Owned CWG files, services and tables removed. Dependency packages remain.')
-    print('Live forwarding settings remain enabled in case another service now needs them; their CWG persistence file was removed.')
+    print('Live networking settings remain in case another service now needs them; their CWG persistence file was removed.')
 
 
 def main():

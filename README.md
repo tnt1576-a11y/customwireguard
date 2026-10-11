@@ -5,6 +5,11 @@ carrier**. It carries complete native WireGuard datagrams and remains UDP-only;
 there is no TCP fallback. Each authenticated request permits one same-sized
 response; the server queues return traffic until the client requests it.
 See [request/reply mode and its bandwidth cost](docs/EXCHANGE.md).
+Version 0.6 adds up to three independent users with negotiated rate sharing,
+bounded burst handling, a fresh Debian installer, application-selection controls
+for Windows and optional Telegram management. The final development WAN
+comparison returned 6600/6600 probes while verifying three downloads and a burst
+upload; residual outer loss remains. See [multi-user results](docs/MULTI-USER.md).
 Version 0.5.8 corrects loss accounting after a rate reduction, protects native
 handshakes from short data-queue deadlines, and improves bounded burst handling.
 Normal use keeps 8000 requests/s, 2 ms reordering and spare-slot backup copies.
@@ -32,11 +37,9 @@ For a separate Windows test PC, see [LAN remote test access](docs/REMOTE-TESTING
 For a fresh Debian 13 server, use the [verified server setup script](docs/SERVER-SETUP.md).
 It installs the current request/reply profile, keeps the native backend private,
 and exports a private Windows client ZIP. Existing installations are not upgraded
-by this command. The published 0.5.8 installer provisions one client; the 0.6
-development installer and [independent-user management](docs/MULTI-USER.md) are
-under validation. Negotiated shared-rate grants and bounded arrival handling
-passed a three-user WAN comparison with 6600/6600 probes and all four transfers
-verified. Release packaging and final deployment remain in progress.
+by this command. The 0.6 installer creates an initial owner account;
+[independent-user management](docs/MULTI-USER.md) exports a separate bundle for
+each additional person. Shared servers require matching 0.6 client bundles.
 Windows application selection is available through the
 [application client](docs/APPLICATION-CLIENT.md). It supports program/folder
 include and exclude rules, using a pinned local routing engine with the existing

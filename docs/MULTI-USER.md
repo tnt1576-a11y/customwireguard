@@ -1,12 +1,12 @@
-# Independent users: 0.6 development status
+# Independent users in 0.6
 
-The development server has one UDP listener and up to three independent user
+The 0.6 server has one UDP listener and up to three independent user
 contexts. Each account has its own outer credential, WireGuard keys and tunnel
-address. The deployed 0.5.8 server and published 0.5.8 client packages remain the
-single-user baseline. Negotiated client rate limits now pass local and delayed
-path tests. The final development candidate also passed a three-user WAN load
-comparison. **Release packaging and deployment are still in progress; do not
-treat this development work as the final release.**
+address. Negotiated rates pass local, delayed-path and three-user WAN load tests.
+Legacy 0.5.8 single-user bundles cannot negotiate shared mode; export matching
+0.6 bundles for the shared server. The fresh installer refuses existing manual
+installations rather than overwriting them. Results below describe bounded tests,
+not a long-term zero-loss or undetectability guarantee.
 
 ## Provisioning commands
 
@@ -95,7 +95,7 @@ failed. The other native handshake timestamps and outer session counts stayed
 unchanged. These are local validation results, not Internet latency or capacity
 claims.
 
-The current development protocol negotiates `exchange_shared` inside the
+The shared protocol negotiates `exchange_shared` inside the
 authenticated handshake. Each request includes encrypted demand and acknowledgment
 of the current grant. Replies advertise a versioned rate grant. Capacity withdrawn
 from a busy user is held until that user acknowledges the reduction; it is then
