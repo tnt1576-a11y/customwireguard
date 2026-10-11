@@ -38,6 +38,8 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	t.Run("fec-server-legacy-client", func(t *testing.T) { testRealWireGuard(t, false, -8, true) })
 	t.Run("fec-burst-loss", func(t *testing.T) { testRealWireGuard(t, false, -9, true) })
 	t.Run("shared-exchange", func(t *testing.T) { testRealWireGuard(t, false, -10, true) })
+	t.Run("economy-shared", func(t *testing.T) { testRealWireGuard(t, false, -11, true) })
+	t.Run("economy-with-loss", func(t *testing.T) { testRealWireGuard(t, false, -12, true) })
 }
 
 func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
@@ -98,7 +100,7 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 			if pace == -3 {
 				clientCfg.ExchangeReorderMS, serverCfg.ExchangeReorderMS = 2, 2
 			}
-			if pace == -4 || pace == -5 {
+			if pace == -4 || pace == -5 || pace == -12 {
 				clientCfg.ExchangeReorderMS, serverCfg.ExchangeReorderMS = 2, 2
 				clientCfg.ExchangeRepair, serverCfg.ExchangeRepair = true, true
 			}
@@ -116,11 +118,12 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 				clientCfg.ExchangePPS = 200
 				clientCfg.ExchangeQueueMS, serverCfg.ExchangeQueueMS = 500, 500
 			}
-			if pace == -10 {
+			if pace == -10 || pace == -11 {
 				clientCfg.ExchangeShared, serverCfg.ExchangeShared = true, true
 				clientCfg.ExchangeReorderMS, serverCfg.ExchangeReorderMS = 2, 2
 				clientCfg.ExchangeRepair, serverCfg.ExchangeRepair = true, true
 			}
+			clientCfg.ExchangeEconomy = pace == -11 || pace == -12
 		}
 	}
 	if h3 {
@@ -131,7 +134,7 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 	}
 	endpoint := public.LocalAddr().(*net.UDPAddr)
 	var losses *[2]atomic.Uint32
-	if pace == -5 || pace == -7 || pace == -9 {
+	if pace == -5 || pace == -7 || pace == -9 || pace == -12 {
 		key, _ := clientCfg.Secret()
 		dropCount := 1
 		if pace == -9 {
@@ -155,7 +158,7 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 		go func() { done <- RunH3Server(ctx, public, serverCfg, ss) }()
 	} else {
 		go func() { done <- RunClient(ctx, local, remote, clientCfg, cs) }()
-		if pace == -10 {
+		if pace == -10 || pace == -11 {
 			multiStats = new(MultiStats)
 			multi := config.MultiServer{Mode: "server-multi", Listen: serverCfg.Listen, MaxPPS: 8000, Users: []config.ServerUser{{Name: "native", Config: serverCfg}}}
 			go func() { done <- RunMultiServer(ctx, public, multi, nil, multiStats) }()

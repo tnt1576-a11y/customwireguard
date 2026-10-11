@@ -66,6 +66,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 	id := wire.NewID()
 	flights := new(exchangeFlights)
 	control := newExchangeControl(cfg.ExchangePPS, cfg.ExchangeMaxPPS, attempt, stats)
+	control.economy = cfg.ExchangeEconomy
 	pacer := exchangePacer{}
 	// Only this event loop owns these buffers. send completes synchronously;
 	// flights retain metadata, while repair retains the separate native payload.
@@ -103,6 +104,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				upload.maxAge = time.Second
 				flights = new(exchangeFlights)
 				control = newExchangeControl(cfg.ExchangePPS, cfg.ExchangeMaxPPS, now, stats)
+				control.economy = cfg.ExchangeEconomy
 				pacer = exchangePacer{}
 				grant = clientGrant{}
 				stats.ExchangePending.Store(0)
@@ -178,6 +180,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				if send(remote, zeroAddr, out, stats) {
 					flights.add(active.send, at, size)
 					stats.ExchangeRequests.Add(1)
+					stats.ExchangeRequestBytes.Add(uint64(len(out)))
 					if len(payload) > 0 {
 						if parity {
 							stats.ExchangeFECParity.Add(1)
@@ -190,6 +193,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 						if backup {
 							stats.ExchangeRepairSent.Add(1)
 						} else {
+							control.uploaded++
 							repair.remember(payload, at)
 						}
 					}
@@ -209,7 +213,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			now := time.Now()
 			upload.push(p.data, p.at)
 			if upload.length() >= 16 {
-				control.resume(now)
+				control.resumeUpload(now, upload.length())
 			}
 			busy(now)
 		case p := <-channels[1]:
@@ -256,6 +260,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			}
 			stats.ExchangePending.Store(uint64(flights.count))
 			stats.ExchangeReplies.Add(1)
+			stats.ExchangeReplyBytes.Add(uint64(len(p.data)))
 			header := 9
 			if cfg.ExchangeShared {
 				header = 12

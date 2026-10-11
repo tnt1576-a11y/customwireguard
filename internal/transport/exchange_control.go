@@ -23,6 +23,10 @@ type exchangeControl struct {
 	recovering             bool
 	lastReduction          time.Time
 	delayReduction         time.Time
+	// Opt-in bandwidth experiment. Counts original uploads and all data-bearing
+	// replies, including repair, so reducing empty polls still leaves headroom.
+	economy               bool
+	uploaded, moreReplies int
 }
 
 // Resume only capacity recently sustained by authenticated deliveries. This
@@ -30,8 +34,28 @@ type exchangeControl struct {
 // normal pacer and congestion response. No traffic is sent solely to keep this
 // memory alive, and a fresh association starts with no remembered capacity.
 func (c *exchangeControl) resume(now time.Time) {
-	if c.provenRate > c.rate && now.Before(c.provenUntil) && !now.Before(c.cooldown) && c.lost == 0 && !c.lastReply.IsZero() && now.Sub(c.lastReply) <= max(500*time.Millisecond, 3*c.srtt) && c.srtt <= c.minRTT+25*time.Millisecond {
-		c.rate = min(c.ceiling, c.provenRate)
+	if c.economy {
+		// A single short queue burst must not restore a previously saturated
+		// rate indefinitely. Normal authenticated growth remains available.
+		return
+	}
+	c.resumeTo(now, c.provenRate)
+}
+
+func (c *exchangeControl) resumeUpload(now time.Time, queued int) {
+	if !c.economy {
+		c.resume(now)
+		return
+	}
+	// Real local packets are stronger evidence than one remote queue bit.
+	// Drain the observed burst over about 20 ms, capped by proven capacity;
+	// never restore the entire old rate for a handful of newly queued packets.
+	c.resumeTo(now, min(c.provenRate, max(c.base, queued*50)))
+}
+
+func (c *exchangeControl) resumeTo(now time.Time, demand int) {
+	if demand > c.rate && now.Before(c.provenUntil) && !now.Before(c.cooldown) && c.lost == 0 && !c.lastReply.IsZero() && now.Sub(c.lastReply) <= max(500*time.Millisecond, 3*c.srtt) && c.srtt <= c.minRTT+25*time.Millisecond {
+		c.rate = min(c.ceiling, demand)
 		c.quiet = 0
 		c.stats.ExchangeRateIncreases.Add(1)
 		c.stats.ExchangeResumes.Add(1)
@@ -82,6 +106,9 @@ func (c *exchangeControl) reply(now time.Time, rtt time.Duration, useful, more b
 		c.useful++
 	}
 	c.backlog = c.backlog || more
+	if more {
+		c.moreReplies++
+	}
 }
 
 func (c *exchangeControl) update(now time.Time, uploadPending bool) {
@@ -94,6 +121,15 @@ func (c *exchangeControl) update(now time.Time, uploadPending bool) {
 	total := c.lossAcks + c.lost
 	loss := total >= 16 && c.lost*100 > total*2
 	delay := c.acks >= 16 && c.epochMin > c.minRTT+25*time.Millisecond
+	backlog := c.backlog
+	target := c.rate
+	if c.economy && c.acks >= 8 {
+		// A single "more" bit can represent a short coalesced burst, not a
+		// sustained need for four times the packet rate. Preserve growth when
+		// at least one quarter of authenticated replies report a queue.
+		backlog = c.moreReplies*4 >= c.acks
+		target = max(c.base, int(math.Ceil(float64(max(c.uploaded, c.useful))/elapsed.Seconds()*1.5)))
+	}
 	if loss || delay {
 		c.rate = max(c.base, c.rate*7/10)
 		c.lastReduction = now
@@ -115,7 +151,13 @@ func (c *exchangeControl) update(now time.Time, uploadPending bool) {
 			c.delayReduction = now
 			c.stats.ExchangeDelayBackoffs.Add(1)
 		}
-	} else if !now.Before(c.cooldown) && c.acks >= 8 && (uploadPending || c.backlog || c.useful*4 >= c.acks*3) {
+	} else if c.economy && c.acks >= 8 && !uploadPending && !backlog && target < c.rate*3/4 {
+		c.quiet++
+		if c.quiet >= 2 {
+			c.rate = max(target, c.rate/2)
+			c.quiet = 0
+		}
+	} else if !now.Before(c.cooldown) && c.acks >= 8 && (uploadPending || backlog || c.useful*4 >= c.acks*3) {
 		// A growth decision alone is not proof the higher rate was delivered.
 		if c.lost == 0 && float64(c.acks) >= float64(c.rate)*elapsed.Seconds()*.8 && c.rate >= c.provenRate {
 			c.provenRate = c.rate
@@ -151,6 +193,7 @@ func (c *exchangeControl) update(now time.Time, uploadPending bool) {
 	c.useful = 0
 	c.lost = 0
 	c.backlog = false
+	c.uploaded, c.moreReplies = 0, 0
 }
 
 func (c *exchangeControl) timeout() time.Duration {

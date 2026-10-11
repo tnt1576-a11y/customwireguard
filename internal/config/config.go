@@ -36,6 +36,7 @@ type Config struct {
 	ExchangeRepair       bool   `json:"exchange_repair,omitempty"`
 	ExchangeFEC          bool   `json:"exchange_fec,omitempty"`
 	ExchangeShared       bool   `json:"exchange_shared,omitempty"`
+	ExchangeEconomy      bool   `json:"exchange_economy,omitempty"`
 }
 
 func Load(path string, mode string) (Config, error) {
@@ -122,6 +123,9 @@ func (c Config) Validate(mode string) error {
 	}
 	if c.ExchangeShared && (c.Transport != "exchange" || c.ExchangeFEC || (mode == "client" && c.ExchangeMaxPPS == 0)) {
 		return errors.New("exchange_shared requires exchange transport, an adaptive client, and exchange_fec disabled")
+	}
+	if c.ExchangeEconomy && (mode != "client" || c.Transport != "exchange" || c.ExchangeMaxPPS == 0 || c.ExchangeFEC) {
+		return errors.New("exchange_economy is experimental and requires an adaptive exchange client without FEC")
 	}
 	if c.PaceKbps != 0 && (c.PaceKbps < 128 || c.PaceKbps > 100000) {
 		return errors.New("pace_kbps must be zero or 128..100000")

@@ -143,6 +143,9 @@ its overhead. Longer mixed-traffic tests matter more than raising peak speed.
 
 ## Other tradeoffs
 
+On the research branch, [the opt-in bandwidth experiment](BANDWIDTH-EXPERIMENT.md)
+records the initial implementation and WAN tradeoffs. It is not part of 0.6.3.
+
 Padding conceals obvious exposed WireGuard fields and lengths, but does not
 make CWG indistinguishable from HTTPS. Port, timing, lengths, volume and the
 server address remain observable. Avoiding one classifier does not guarantee

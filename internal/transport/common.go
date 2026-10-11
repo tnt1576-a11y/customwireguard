@@ -33,6 +33,8 @@ type Stats struct {
 	PacingPeakBytes            atomic.Uint64
 	PacingWaitUS               atomic.Uint64
 	ExchangeRequests           atomic.Uint64
+	ExchangeRequestBytes       atomic.Uint64
+	ExchangeReplyBytes         atomic.Uint64
 	ExchangeResumes            atomic.Uint64
 	ExchangeReplies            atomic.Uint64
 	ExchangeEmpty              atomic.Uint64
@@ -89,6 +91,7 @@ func (s *Stats) Snapshot() map[string]uint64 {
 		"pacing_queued": s.PacingQueued.Load(), "pacing_dropped": s.PacingDropped.Load(),
 		"pacing_queue_bytes": s.PacingQueueBytes.Load(), "pacing_peak_bytes": s.PacingPeakBytes.Load(),
 		"pacing_wait_us": s.PacingWaitUS.Load(), "exchange_requests": s.ExchangeRequests.Load(),
+		"exchange_request_bytes": s.ExchangeRequestBytes.Load(), "exchange_reply_bytes": s.ExchangeReplyBytes.Load(),
 		"exchange_replies": s.ExchangeReplies.Load(), "exchange_empty": s.ExchangeEmpty.Load(),
 		"exchange_expired": s.ExchangeExpired.Load(), "exchange_queue_dropped": s.ExchangeQueueDropped.Load(),
 		"exchange_resumes": s.ExchangeResumes.Load(),

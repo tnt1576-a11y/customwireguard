@@ -61,6 +61,34 @@ func TestRejectUnknownAndTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestEconomyIsOptInAndClientOnly(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "economy")
+	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(filepath.Join(dir, "client.json"), "client")
+	if err != nil || c.ExchangeEconomy {
+		t.Fatal("economy must default off", err)
+	}
+	c.ExchangeEconomy = true
+	if c.Validate("client") == nil {
+		t.Fatal("economy accepted without adaptive exchange")
+	}
+	c.Transport, c.ExchangeMaxPPS = "exchange", 8000
+	if err := c.Validate("client"); err != nil {
+		t.Fatal(err)
+	}
+	c.ExchangeFEC = true
+	if c.Validate("client") == nil {
+		t.Fatal("economy accepted with FEC")
+	}
+	s, _ := Load(filepath.Join(dir, "server.json"), "server")
+	s.ExchangeEconomy = true
+	if s.Validate("server") == nil {
+		t.Fatal("server accepted client-only economy setting")
+	}
+}
+
 func TestExchangeBurstConfig(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bundle")
 	if err := Initialize(dir, "192.0.2.10:443", "balanced"); err != nil {
