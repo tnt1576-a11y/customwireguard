@@ -16,7 +16,7 @@
    </StackPanel>
    <StackPanel Grid.Row="2">
     <Border Background="#172232" CornerRadius="12" Padding="15"><StackPanel><TextBlock Text="Local devices stay reachable" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Your LAN connection is kept direct, including RDP." FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="19"/></StackPanel></Border>
-    <TextBlock Text="CWG Desktop 0.6.2  ·  UDP transport" FontSize="11" Foreground="#6E819F" Margin="2,19,0,0"/>
+    <TextBlock Text="CWG Desktop 0.6.3  ·  UDP transport" FontSize="11" Foreground="#6E819F" Margin="2,19,0,0"/>
    </StackPanel>
   </Grid>
   <Grid Grid.Column="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

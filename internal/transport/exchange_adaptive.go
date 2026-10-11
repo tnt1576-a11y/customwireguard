@@ -67,6 +67,10 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 	flights := new(exchangeFlights)
 	control := newExchangeControl(cfg.ExchangePPS, cfg.ExchangeMaxPPS, attempt, stats)
 	pacer := exchangePacer{}
+	// Only this event loop owns these buffers. send completes synchronously;
+	// flights retain metadata, while repair retains the separate native payload.
+	txBuffer := make([]byte, wire.MaxDatagram)
+	requestBuffer := make([]byte, wire.ExchangeMaxPayload+4)
 	defer stats.ExchangePending.Store(0)
 	defer stats.ExchangeRatePPS.Store(0)
 	defer stats.ExchangeGrantPPS.Store(0)
@@ -165,9 +169,9 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				size := wire.RandomBetween(wire.ExchangeMinSize, wire.MaxDatagram)
 				body := payload
 				if cfg.ExchangeShared {
-					body = sharedRequest(payload, grant.version, desired, cfg.ExchangeMaxPPS)
+					body = sharedRequestInto(requestBuffer, payload, grant.version, desired, cfg.ExchangeMaxPPS)
 				}
-				out, e := active.sealSized(wire.Exchange, body, size, at)
+				out, e := active.sealSizedInto(txBuffer, wire.Exchange, body, size, at)
 				if e != nil {
 					return e
 				}
@@ -233,7 +237,10 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				arm(now, 0)
 				continue
 			}
-			f, ok, newest := active.open(p.data, now)
+			// pump supplies an independent allocation for each packet. Delivery
+			// may retain its payload across reordering; that backing array is never
+			// recycled here. Bootstrap and multi-user fanout remain non-mutating.
+			f, ok, newest := active.openInPlace(p.data, now)
 			if !ok || f.Kind != wire.ExchangeReply {
 				stats.Rejected.Add(1)
 				continue

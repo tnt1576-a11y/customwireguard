@@ -265,15 +265,28 @@ func (a *association) seal(kind byte, payload []byte, profile string, now time.T
 }
 
 func (a *association) sealSized(kind byte, payload []byte, size int, now time.Time) ([]byte, error) {
+	return a.sealSizedInto(nil, kind, payload, size, now)
+}
+
+func (a *association) sealSizedInto(dst []byte, kind byte, payload []byte, size int, now time.Time) ([]byte, error) {
 	if a.send == math.MaxUint64 {
 		return nil, errors.New("session sequence exhausted")
 	}
 	a.send++
-	return a.codec.Seal(wire.Frame{Kind: kind, ID: a.id, Sequence: a.send, Timestamp: now.Unix(), Payload: payload}, size)
+	return a.codec.SealInto(dst, wire.Frame{Kind: kind, ID: a.id, Sequence: a.send, Timestamp: now.Unix(), Payload: payload}, size)
 }
 
 func (a *association) open(p []byte, now time.Time) (wire.Frame, bool, bool) {
 	f, err := a.codec.Open(p, now)
+	return a.acceptFrame(f, err, len(p), now)
+}
+
+func (a *association) openInPlace(p []byte, now time.Time) (wire.Frame, bool, bool) {
+	f, err := a.codec.OpenInPlace(p, now)
+	return a.acceptFrame(f, err, len(p), now)
+}
+
+func (a *association) acceptFrame(f wire.Frame, err error, size int, now time.Time) (wire.Frame, bool, bool) {
 	if err != nil || f.ID != a.id {
 		return wire.Frame{}, false, false
 	}
@@ -282,8 +295,8 @@ func (a *association) open(p []byte, now time.Time) (wire.Frame, bool, bool) {
 		if a.shared {
 			requestHeader, replyHeader = 4, 12
 		}
-		if !((f.Kind == wire.Exchange && len(f.Payload) >= requestHeader && len(f.Payload) <= wire.ExchangeMaxPayload+requestHeader && len(p) >= wire.ExchangeMinSize) ||
-			(f.Kind == wire.ExchangeReply && len(f.Payload) >= replyHeader && len(f.Payload) <= wire.ExchangeMaxPayload+replyHeader && f.Payload[8] <= 1 && len(p) >= wire.ExchangeMinSize)) {
+		if !((f.Kind == wire.Exchange && len(f.Payload) >= requestHeader && len(f.Payload) <= wire.ExchangeMaxPayload+requestHeader && size >= wire.ExchangeMinSize) ||
+			(f.Kind == wire.ExchangeReply && len(f.Payload) >= replyHeader && len(f.Payload) <= wire.ExchangeMaxPayload+replyHeader && f.Payload[8] <= 1 && size >= wire.ExchangeMinSize)) {
 			return wire.Frame{}, false, false
 		}
 		if a.shared {

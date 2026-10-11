@@ -106,12 +106,24 @@ func (c *Codec) maxKind() byte {
 }
 
 func (c *Codec) Seal(f Frame, size int) ([]byte, error) {
+	return c.SealInto(nil, f, size)
+}
+
+// SealInto uses caller-owned scratch storage when its capacity permits. The
+// returned packet aliases dst; callers must finish sending before reusing it.
+// f.Payload must not overlap dst. Nonces, padding and framing are unchanged.
+func (c *Codec) SealInto(dst []byte, f Frame, size int) ([]byte, error) {
 	if size < Overhead+len(f.Payload) || size > MaxDatagram || f.Kind < Hello || f.Kind > c.maxKind() {
 		return nil, fmt.Errorf("frame exceeds datagram budget or has invalid type")
 	}
-	nonce := make([]byte, chacha20poly1305.NonceSizeX, size)
+	if cap(dst) < size {
+		dst = make([]byte, size)
+	} else {
+		dst = dst[:size]
+	}
+	nonce := dst[:chacha20poly1305.NonceSizeX]
 	rand.Read(nonce)
-	plain := make([]byte, size-chacha20poly1305.NonceSizeX-chacha20poly1305.Overhead)
+	plain := dst[chacha20poly1305.NonceSizeX : size-chacha20poly1305.Overhead]
 	plain[0], plain[1] = c.version, f.Kind
 	binary.BigEndian.PutUint64(plain[2:10], uint64(f.Timestamp))
 	copy(plain[10:26], f.ID[:])
@@ -123,12 +135,27 @@ func (c *Codec) Seal(f Frame, size int) ([]byte, error) {
 }
 
 func (c *Codec) Open(packet []byte, now time.Time) (Frame, error) {
+	return c.open(packet, now, false)
+}
+
+// OpenInPlace consumes an exclusively owned packet. Its contents may change
+// even on failure; successful payload bytes alias that packet. Do not use this
+// for bootstrap fanout, retransmission storage or shared receive buffers.
+func (c *Codec) OpenInPlace(packet []byte, now time.Time) (Frame, error) {
+	return c.open(packet, now, true)
+}
+
+func (c *Codec) open(packet []byte, now time.Time, inPlace bool) (Frame, error) {
 	var f Frame
 	if len(packet) < Overhead || len(packet) > MaxDatagram {
 		return f, ErrPacket
 	}
 	n := chacha20poly1305.NonceSizeX
-	plain, err := c.rx.Open(nil, packet[:n], packet[n:], nil)
+	var dst []byte
+	if inPlace {
+		dst = packet[n:n]
+	}
+	plain, err := c.rx.Open(dst, packet[:n], packet[n:], nil)
 	if err != nil || len(plain) < HeaderSize {
 		return f, ErrPacket
 	}

@@ -3,6 +3,7 @@ package wire
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/binary"
 	"math"
 	"testing"
 	"time"
@@ -21,6 +22,69 @@ func pair(t testing.TB, material []byte) (*Codec, *Codec) {
 		t.Fatal(e)
 	}
 	return c, s
+}
+
+func TestScratchCodecCompatibilityAndOwnership(t *testing.T) {
+	for _, version := range []byte{1, 2} {
+		c, _ := newCodec(bytes.Repeat([]byte{9}, 32), nil, true, version)
+		s, _ := newCodec(bytes.Repeat([]byte{9}, 32), nil, false, version)
+		now := time.Unix(2000000000, 0)
+		dst := bytes.Repeat([]byte{0xff}, MaxDatagram)
+		for _, length := range []int{1312, 0, 32, 1280} {
+			f := Frame{Kind: Data, ID: NewID(), Sequence: uint64(length + 1), Timestamp: now.Unix(), Payload: bytes.Repeat([]byte{7}, length)}
+			packet, err := c.SealInto(dst, f, 1400)
+			if err != nil || len(packet) != 1400 || &packet[0] != &dst[0] {
+				t.Fatalf("scratch destination: %v", err)
+			}
+			// Decode directly using the previous on-wire header layout, independently
+			// of Codec.Open. No version, nonce size, header or padding rule changed.
+			plain, err := s.rx.Open(nil, packet[:24], packet[24:], nil)
+			if err != nil || plain[0] != version || plain[1] != f.Kind || binary.BigEndian.Uint64(plain[2:10]) != uint64(f.Timestamp) || !bytes.Equal(plain[10:26], f.ID[:]) || binary.BigEndian.Uint64(plain[26:34]) != f.Sequence || int(binary.BigEndian.Uint16(plain[34:36])) != length || !bytes.Equal(plain[36:36+length], f.Payload) {
+				t.Fatalf("legacy layout differs: %v", err)
+			}
+			original := bytes.Clone(packet)
+			ordinary, err := s.Open(packet, now)
+			if err != nil || !bytes.Equal(packet, original) {
+				t.Fatal("ordinary Open must not consume shared input")
+			}
+			owned := bytes.Clone(packet)
+			opened, err := s.OpenInPlace(owned, now)
+			if err != nil || opened.ID != ordinary.ID || opened.Sequence != ordinary.Sequence || !bytes.Equal(opened.Payload, f.Payload) {
+				t.Fatalf("in-place decode: %v", err)
+			}
+			if length > 0 && &opened.Payload[0] != &owned[24+HeaderSize] {
+				t.Fatal("OpenInPlace allocated a second payload buffer")
+			}
+			if _, err = c.SealInto(dst, f, 1440); err != nil || !bytes.Equal(opened.Payload, f.Payload) {
+				t.Fatal("next send overwrote separately owned receive payload")
+			}
+			for i := range original {
+				bad := bytes.Clone(original)
+				bad[i] ^= 1
+				if got, err := s.OpenInPlace(bad, now); err == nil || got.Payload != nil {
+					t.Fatalf("in-place tampering at %d accepted", i)
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkSealOpenScratch1280(b *testing.B) {
+	c, s := pair(b, bytes.Repeat([]byte{8}, 48))
+	now := time.Now()
+	f := Frame{Kind: Data, ID: NewID(), Sequence: 1, Timestamp: now.Unix(), Payload: make([]byte, 1312)}
+	dst := make([]byte, MaxDatagram)
+	b.SetBytes(1280)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		p, e := c.SealInto(dst, f, 1400)
+		if e != nil {
+			b.Fatal(e)
+		}
+		if _, e := s.OpenInPlace(p, now); e != nil {
+			b.Fatal(e)
+		}
+	}
 }
 
 func TestFrameIntegrityAndDirections(t *testing.T) {
@@ -138,6 +202,12 @@ func FuzzOpen(f *testing.F) {
 	f.Add(bytes.Repeat([]byte{0}, 1440))
 	f.Fuzz(func(t *testing.T, p []byte) {
 		got, e := s.Open(p, time.Unix(2000000000, 0))
+		consumed, consumeErr := s.OpenInPlace(bytes.Clone(p), time.Unix(2000000000, 0))
+		if (e == nil) != (consumeErr == nil) || (e == nil &&
+			(got.Kind != consumed.Kind || got.ID != consumed.ID || got.Sequence != consumed.Sequence ||
+				got.Timestamp != consumed.Timestamp || !bytes.Equal(got.Payload, consumed.Payload))) {
+			t.Fatal("in-place decode differs from ordinary decode")
+		}
 		if e == nil && len(got.Payload) > MaxPayload {
 			t.Fatal("unbounded payload")
 		}

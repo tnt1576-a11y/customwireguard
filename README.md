@@ -5,19 +5,21 @@ app and a Debian server installer. Each authenticated, encrypted and padded
 client request allows one same-sized server reply. Native WireGuard still
 handles the inner VPN encryption and peer identity.
 
-**Version 0.6.2** fixes Disconnect when Windows runtime-folder permissions have
-changed. Recovery stops identified CWG processes using the verified app helpers,
-retires the old runtime privately and creates a protected replacement. Startup
-still refuses unsafe permissions. The transport protocol is unchanged from 0.6.
+**Version 0.6.3** reduces carrier buffer allocation while preserving packet
+format, encryption, padding, pacing and repair. Matched Windows 10 trials used
+about 9% less aggregate carrier CPU time with no application probe loss and
+comparable latency; individual results varied. It includes the 0.6.2 disconnect
+recovery fix. Existing servers and profiles work unchanged. See the measured
+[CPU and traffic results](docs/PERFORMANCE.md).
 
 ## Download
 
-[Release and checksums](https://github.com/tnt1576-a11y/customwireguard/releases/tag/v0.6.2)
+[Release and checksums](https://github.com/tnt1576-a11y/customwireguard/releases/tag/v0.6.3)
 
 | Package | Purpose |
 |---|---|
-| `cwg-windows-0.6.2.zip` | Shareable Windows app and offline routing engine; no account credentials |
-| `cwg-server-0.6.2.zip` | Fresh Linux server installer, binaries, client-export helpers and documentation |
+| `cwg-windows-0.6.3.zip` | Shareable Windows app and offline routing engine; no account credentials |
+| `cwg-server-0.6.3.zip` | Fresh Linux server installer, binaries, client-export helpers and documentation |
 | `*.zip.sha256` | SHA-256 checksum for the matching archive |
 
 This repository is private. GitHub downloads require repository access; an
@@ -29,7 +31,7 @@ administrator can send the original Windows ZIP directly to a user instead.
 
 Requires 64-bit Windows 10/11, .NET Framework 4.8 and administrator permission.
 
-1. Extract **all** of `cwg-windows-0.6.2.zip` into a writable local folder. Keep
+1. Extract **all** of `cwg-windows-0.6.3.zip` into a writable local folder. Keep
    `CWG.exe`, `bin` and `scripts` together.
 2. Double-click **CWG.exe** and accept the administrator prompt.
 3. Click **Import configuration** and select your private `.cwg` file. Each
@@ -53,7 +55,7 @@ See [application behavior and recovery](docs/APPLICATION-CLIENT.md).
 To update, disconnect, extract the new ZIP into a new folder and import your
 existing `.cwg` profile. Do not mix helpers from different releases. If an older
 app cannot disconnect, dismiss its error and close the UI process using Task
-Manager if necessary; open 0.6.2 and click **Disconnect**. It detects the existing
+Manager if necessary; open 0.6.3 and click **Disconnect**. It detects the existing
 session without needing another profile import. Do not grant yourself access to
 `C:\ProgramData\CWG-AppTunnel` through Explorer; the app manages that directory.
 
@@ -63,7 +65,7 @@ Use Debian 13 with systemd and amd64 or arm64. The amd64 installer has been
 exercised in Debian 13; arm64 is cross-compiled but not runtime tested. This is
 a **fresh install**, not an upgrade command for an existing CWG server.
 
-Download `cwg-server-0.6.2.zip` and its `.sha256` file from the release, then copy
+Download `cwg-server-0.6.3.zip` and its `.sha256` file from the release, then copy
 both securely to a private server directory. Private GitHub release URLs cannot
 be downloaded anonymously. Run as root:
 
@@ -72,9 +74,9 @@ be downloaded anonymously. Run as root:
 apt-get update
 apt-get install -y python3 unzip
 
-sha256sum -c cwg-server-0.6.2.zip.sha256
-unzip -q cwg-server-0.6.2.zip
-cd cwg-server-0.6.2
+sha256sum -c cwg-server-0.6.3.zip.sha256
+unzip -q cwg-server-0.6.3.zip
+cd cwg-server-0.6.3
 ip -4 route get 1.1.1.1
 ```
 
@@ -133,6 +135,9 @@ and [SSH-only provisioning](docs/MULTI-USER.md).
   There is no fixed overhead percentage. At four requests/s idle, average
   1420-byte requests/replies total about **40.9 MB/hour sent + received**, before
   outer IP/UDP and link overhead. Active traffic raises the rate automatically.
+  Short mixed tests used 198-265 MB of combined interface traffic for 20 MiB of
+  bulk transfers plus probes; padding, polling and repair can greatly exceed
+  the ideal full-packet estimate. Bandwidth reduction is separate work.
 - **CPU and latency:** outer encryption, padding, copies and UDP I/O add work.
   Windows also runs a separate routing/WireGuard engine. Queueing and loss
   recovery trade latency against delivery.
@@ -150,14 +155,15 @@ separate measurements from proposals.
 Exact 0.6 transport release comparisons with three accounts returned 6595/6596
 and 6598/6598 application probes in two short runs. These are application
 delivery counts, not proof of zero outer loss. The 0.6.1 UI trials covered Full
-PC, Include and Exclude routing, DNS/LAN behavior and cleanup. The 0.6.2
-disconnect regression is recorded in [validation](docs/VALIDATION.md).
+PC, Include and Exclude routing, DNS/LAN behavior and cleanup. The 0.6.3 CPU
+comparison returned 798/798 probes in each version. Disconnect recovery and
+the exact packaged app checks are recorded in [validation](docs/VALIDATION.md).
 
 Build in Windows PowerShell with Go available (or `.tools/go/bin/go.exe`) and
 the .NET Framework compiler:
 
 ```powershell
-.\scripts\Build.ps1 -Version 0.6.2
+.\scripts\Build.ps1 -Version 0.6.3
 .\scripts\Package-Desktop.ps1 -Release RELEASE_FOLDER -EngineArchive OFFICIAL_SING_BOX_ZIP -Destination NEW_APP_FOLDER
 ```
 

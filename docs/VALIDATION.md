@@ -1411,3 +1411,38 @@ and child links. App configuration and profile-import checks passed under Window
 PowerShell 5.1. The build passed Go module verification, vet and all Go tests with
 local loopback networking allowed; the initial sandboxed run could not open test
 sockets. Transport code was not changed for this release.
+
+# 0.6.3 allocation optimization (2026-10-11)
+
+A private, bounded CPU/allocation profile on the Windows 10 i7-6700HQ test PC
+identified socket I/O as the largest CPU cost and significant codec allocation
+churn. The adaptive client now uses explicit send/header scratch buffers and
+in-place decryption of exclusively owned receive packets. The wire layout,
+cryptography, padding, pacing, congestion control and repair remain unchanged.
+Bootstrap and shared-server fanout retain the non-mutating decoder.
+
+Four valid, unprofiled trials alternated 0.6.2 and the candidate twice using the
+same verified 16 MiB download, 4 MiB upload, idle and game-like UDP phases.
+Each version delivered 798/798 UDP probes; all downloads and uploads passed
+integrity checks. Aggregate carrier CPU time fell from 9.563 to 8.703 seconds
+(about 9%), while adaptive packet counts varied. Individual phase CPU results
+were mixed; this is not a universal reduction guarantee. Latency was comparable
+or slightly lower in these short trials. Full numbers, protocol expirations,
+excluded harness runs and unexpectedly high traffic totals are in PERFORMANCE.md.
+No server transport replacement was needed for these tests.
+
+The codec benchmark on that PC improved from 3649-3658 ns and 4224 B / three
+allocations per operation to 2484-2517 ns and zero allocations on the new path.
+Go module verification, vet and all tests passed, including actual WireGuard,
+loss/reordering and shared-user tests. New ownership/tamper/compatibility checks
+passed; 8,099,146 fuzz cases compared both decoders without a failure. No new
+concurrent buffer ownership was introduced; race instrumentation was not run.
+
+The exact compact 0.6.3 app ZIP passed the actual UI button-handler regression on
+the second PC: ordinary connect/disconnect, changed runtime ACL recovery without
+executing a replaced helper or killing the unrelated process from forged state,
+then successful reconnect/disconnect. All three tunnel pings returned. The
+embedded tool hashes were enforced. Independent SYSTEM cleanup restored the
+Ethernet default route, DNS and existing IPv6 binding; the controller's networking
+was not changed. Offline recovery, routing and profile-import checks also passed.
+Profiling harnesses, keys, profiles and raw results are excluded from the app ZIP.

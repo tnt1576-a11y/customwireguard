@@ -43,7 +43,12 @@ func (g *clientGrant) limit(now time.Time) int {
 }
 
 func sharedRequest(payload []byte, grant uint16, desired, ceiling int) []byte {
-	p := make([]byte, 4+len(payload))
+	return sharedRequestInto(make([]byte, 4+len(payload)), payload, grant, desired, ceiling)
+}
+
+// The adaptive client's scratch header is consumed synchronously by SealInto.
+func sharedRequestInto(dst, payload []byte, grant uint16, desired, ceiling int) []byte {
+	p := dst[:4+len(payload)]
 	binary.BigEndian.PutUint16(p, grant)
 	p[2] = byte(sharedUnits(desired))
 	p[3] = byte(sharedUnits(ceiling))
