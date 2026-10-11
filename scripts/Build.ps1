@@ -14,7 +14,7 @@ function Invoke-Go {
 }
 function Copy-TreeFiles([string]$Directory,[string]$DestinationRoot) {
     $origin=Join-Path $root $Directory
-    Get-ChildItem -LiteralPath $origin -Recurse -File | Where-Object { $_.Extension -in @('.go','.ps1','.py','.sh','.md','.service','.nft','.example') } | ForEach-Object {
+    Get-ChildItem -LiteralPath $origin -Recurse -File | Where-Object { $_.Extension -in @('.go','.ps1','.py','.sh','.md','.service','.socket','.nft','.example') } | ForEach-Object {
         $relative=$_.FullName.Substring($root.Length+1)
         $destination=Join-Path $DestinationRoot $relative
         New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null

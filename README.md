@@ -42,6 +42,9 @@ Windows application selection is available through the
 include and exclude rules, using a pinned local routing engine with the existing
 UDP carrier. The separate-PC tests include TCP/UDP, DNS, LAN access and failure
 recovery. Native CWG remains available; stop it before using app mode.
+Optional [Telegram management](docs/TELEGRAM.md) provides owner-only status,
+account creation/revocation and transport restart. It installs separately and
+starts only after the operator supplies a private token and enables it.
 Version 0.5.0 adds optional adaptive request scheduling, a larger in-flight
 window, short native-data queue deadlines and sampled diagnostics. It preserves
 the same authenticated version-2 datagrams and one same-sized reply per request.

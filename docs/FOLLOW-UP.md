@@ -39,9 +39,10 @@ Negotiated rate control now passes local and simulated 90 ms RTT tests with
 1000/1000 probes for both continuing clients and no shared-queue expirations.
 The final three-user WAN candidate returned 6600/6600 probes with no shared-queue
 expirations; see VALIDATION.md for residual outer loss and resource cost. Release
-packaging and deployment remain required. Optional Telegram implementation is
-in progress. Both features remain incomplete until their
-runtime tests and operator-facing deliverables demonstrate completion.
+packaging and deployment remain required. Optional Telegram management now passes
+isolated service/account/lifecycle tests and resource measurements; see TELEGRAM.md.
+It stays off until the operator supplies a private token and enables it. Final
+release packaging and deployment remain incomplete.
 
 ## Two or three independent users
 

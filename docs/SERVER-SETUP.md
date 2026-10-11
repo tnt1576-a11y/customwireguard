@@ -9,8 +9,9 @@ This is a **fresh installation**, not an upgrade command for an existing CWG
 server. It refuses existing CWG files, reserved ports, firewall tables and
 overlapping tunnel networks before touching them. The 0.6 development revision
 creates an initial `owner` account and supports separate named accounts; see
-[multi-user status and provisioning](MULTI-USER.md). Loaded WAN validation and
-coordinated rate control are still pending. Use matching 0.6 binaries and source;
+[multi-user status and provisioning](MULTI-USER.md). Coordinated rates and a loaded
+three-user WAN comparison have passed; final release deployment is pending.
+Use matching 0.6 binaries and source;
 the published 0.5.8 installer remains the verified single-client release.
 Do not share one account's ZIP between simultaneous users.
 
@@ -57,6 +58,10 @@ IPv4 Internet egress only: IPv6 forwarding from the tunnel is rejected promptly
 rather than falling back to the client's physical Internet connection.
 
 ## Give the client its private package
+
+Optional owner-only Telegram management is installed separately after server
+verification. See [Telegram setup](TELEGRAM.md); no bot/token is enabled by this
+installer. Remove that component before uninstalling the main server.
 
 The result is `/etc/cwg/client.zip`, readable only by root. Copy it securely to
 the intended Windows computer; do not publish it or commit it to GitHub. It

@@ -404,6 +404,8 @@ def install(args):
 
 
 def uninstall():
+    if Path('/etc/cwg-telegram/install-state.json').exists():
+        raise ValueError('Remove optional Telegram support with telegram_admin.py uninstall before removing CWG.')
     state = read_state()
     if (ROOT / 'user-transaction.json').exists():
         raise ValueError('Recover the pending user operation before uninstalling.')

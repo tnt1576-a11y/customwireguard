@@ -1,0 +1,29 @@
+[Unit]
+Description=Bounded CWG Telegram management request
+
+[Service]
+Type=exec
+User=root
+ExecStart=/usr/bin/python3 -B /usr/local/lib/cwg-telegram/telegram_helper.py
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+RuntimeMaxSec=35
+TimeoutStopSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_CHOWN CAP_DAC_READ_SEARCH CAP_FOWNER
+ProtectSystem=strict
+ReadWritePaths=/etc/cwg /etc/wireguard /run/lock
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryMax=128M
+CPUQuota=50%
+TasksMax=16
+UMask=0077

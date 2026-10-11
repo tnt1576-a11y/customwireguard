@@ -1,0 +1,14 @@
+[Unit]
+Description=Private CWG Telegram management socket
+
+[Socket]
+ListenStream=/run/cwg-telegram-admin.sock
+SocketUser=root
+SocketGroup=cwg-telegram
+SocketMode=0660
+Accept=yes
+MaxConnections=2
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target
