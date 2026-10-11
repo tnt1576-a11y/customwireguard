@@ -1289,3 +1289,60 @@ loopback tests. Focused regressions cover acknowledgement-safe rate borrowing,
 delayed grant expiry, maximum native payloads, rejected legacy negotiation,
 blocked-worker fairness, compressed-arrival dispatch and the unchanged sustained
 rate/deadline limits. The portable installer/account tests also passed.
+
+## 0.6 release deployment and exact-bundle tests (2026-10-11)
+
+The final Linux/Windows 0.6.0 binaries and freshly exported MTU-1280 profiles
+were tested after migrating the live legacy installation to the managed layout.
+All old CWG files, private keys, units and sysctl files were copied and verified
+by hashes, ownership and modes before activation. Original files were retained
+separately. A 15-minute independent rollback guarded activation and validation.
+The public listener is UDP443; the obsolete UDP8443 comparison was retired.
+
+The identical three-user WAN workload above ran twice with the release profiles:
+
+| Exact release trial | UDP replies | Shared queue expired / dropped | Overall p95 RTT per user, ms | 8 MiB upload |
+|---|---:|---:|---|---:|
+| First | 6595 / 6596 | 5 / 0 | 105.040 / 108.365 / 111.837 | 36.435 s |
+| Unchanged repeat | 6598 / 6598 | 0 / 0 | 106.508 / 101.273 / 101.909 | 37.589 s |
+
+All four payload transfers in each row passed SHA-256 verification. The first
+run had a brief common latency spike (maximum 235.852 ms), one application loss,
+42 outer timeouts in 384,950 requests (0.01091%), one client and one server
+original-data queue expiry, and one idle resume. The repeat recorded zero outer
+timeouts in 391,616 requests, zero client original-data expiry and no resumes;
+maximum RTT was 123.472 ms. These short trials do not prove permanent zero loss.
+An attempted repeat had a test-harness JSON encoding error and never started
+its probe workload; it is preserved and excluded from successful counts.
+
+Upload time did not reproduce the earlier candidate's best result. The fresh
+profiles use MTU1280 instead of the earlier manual MTU1088, but this was not a
+controlled MTU comparison; no cause is established. The release is retained for
+its measured stability and independent-user behavior, without a fixed upload
+speed claim. In the first release trial's 52.573-second sampled transfer window,
+CWG used 24.60% of one CPU, the host was 30.03% busy and peak CWG memory was
+12.95 MiB. The workload is three independent stacks on one lab PC/access network.
+
+The exact owner bundle also passed application Include mode: selected programs
+and configured folder children used the server exit, bypassed programs used the
+physical exit, fresh DNS answered, LAN remained reachable, and selected IPv6
+connection attempts failed. There is no working public IPv6 WAN in this lab,
+so this is not a complete live dual-stack bypass test. A 32 MiB download verified
+its digest at about 24.58 Mbps. The entire UDP test returned 500/500 probes;
+its actual 10.965-second download interval returned 218/218 with p95 97.582 ms
+and maximum 110.764 ms. Forced carrier termination recovered, and the independent
+watchdog cleaned up after supervisor termination. Native Full mode separately
+verified the public exit, LAN access and 8/8 tunnel pings (96-99 ms).
+
+Independent SYSTEM cleanup restored the original lab route, DNS and IPv6 binding.
+Temporary accounts were revoked and test services stopped. The controller's VPN
+and networking were not changed. The new private owner bundle replaces old
+single-user credentials; additional people need separately provisioned accounts.
+
+The exact public package also passed a fresh Debian13 amd64 install/repeat,
+three independent authenticated preflights, account limits/revocation, private
+Windows export boundaries, preserved larger UDP socket limits and optional-bot
+uninstall boundaries. Twenty-three portable installer/account/Telegram checks
+passed. Full Go vet/tests and real IPv4/IPv6 WireGuard tests passed before build.
+Optional Telegram's real systemd/management/lifecycle/resource tests used a
+local TLS API fixture; actual Telegram delivery remains untested and disabled.

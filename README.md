@@ -9,7 +9,9 @@ Version 0.6 adds up to three independent users with negotiated rate sharing,
 bounded burst handling, a fresh Debian installer, application-selection controls
 for Windows and optional Telegram management. The final development WAN
 comparison returned 6600/6600 probes while verifying three downloads and a burst
-upload; residual outer loss remains. See [multi-user results](docs/MULTI-USER.md).
+upload. Exact-release runs then returned 6595/6596 and 6598/6598; occasional
+outer loss and upload-speed variation remain. See [release validation](docs/VALIDATION.md#06-release-deployment-and-exact-bundle-tests-2026-10-11)
+and [multi-user provisioning](docs/MULTI-USER.md).
 Version 0.5.8 corrects loss accounting after a rate reduction, protects native
 handshakes from short data-queue deadlines, and improves bounded burst handling.
 Normal use keeps 8000 requests/s, 2 ms reordering and spare-slot backup copies.
@@ -32,7 +34,7 @@ The 0.5.4 user test delivered 66.6 Mbps with overall ping
 median/p95 of 91/100 ms, but retained some burst expirations and TCP retransmits;
 these are short-run results, not a capacity or reliability guarantee.
 See [validation](docs/VALIDATION.md), [DPI limits and resilience](docs/RESILIENCE.md),
-and [multi-user and application split-tunnel follow-ups](docs/FOLLOW-UP.md).
+and [delivery status and practical limits](docs/FOLLOW-UP.md).
 For a separate Windows test PC, see [LAN remote test access](docs/REMOTE-TESTING.md).
 For a fresh Debian 13 server, use the [verified server setup script](docs/SERVER-SETUP.md).
 It installs the current request/reply profile, keeps the native backend private,
