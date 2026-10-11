@@ -21,8 +21,8 @@ using Forms = System.Windows.Forms;
 
 [assembly: AssemblyTitle("CWG Desktop")]
 [assembly: AssemblyProduct("CWG")]
-[assembly: AssemblyVersion("0.6.1.0")]
-[assembly: AssemblyFileVersion("0.6.1.0")]
+[assembly: AssemblyVersion("0.6.2.0")]
+[assembly: AssemblyFileVersion("0.6.2.0")]
 
 namespace Cwg.Desktop {
  internal sealed class AppEntry {
@@ -207,7 +207,7 @@ namespace Cwg.Desktop {
    Text("Message").Text = busy ? lastMessage : state == "Running" ? "Connected  ·  " + elapsed + "  ·  Local network stays direct" : state == "Reconnecting" ? "Reconnecting the transport…" : String.IsNullOrEmpty(lastMessage) ? "Import a profile to get started." : lastMessage;
    if (tray != null) tray.Text = "CWG · " + (Active ? "Connected" : "Disconnected");
   }
-  void Error(string message) { lastMessage = message; Refresh(); MessageBox.Show(window, message, "CWG", MessageBoxButton.OK, MessageBoxImage.Warning); }
+  void Error(string message) { busy = false; lastMessage = message; Refresh(); MessageBox.Show(window, message, "CWG", MessageBoxButton.OK, MessageBoxImage.Warning); }
   void VerifyTools() {
    using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Cwg.ToolHashes"))
    using (var reader = new StreamReader(stream)) {

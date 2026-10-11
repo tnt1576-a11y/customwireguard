@@ -80,6 +80,20 @@ local routing rules are active, not that every remote destination is reachable.
 
 ## Lifecycle and recovery
 
+Desktop 0.6.2 can disconnect after the runtime directory's permissions change.
+It identifies CWG tasks/processes from their fixed paths and command lines,
+ignores process IDs in untrusted state, and uses the app bundle's verified
+signal helper. It never executes the changed runtime's helper during recovery.
+The old flat runtime is retained under a protected `CWG-AppTunnel.recovered-*`
+directory for diagnosis; a new protected runtime is created for the next start.
+Unexpected links, subdirectories or task actions are refused for inspection.
+Startup retains its strict permission check. Do not accept Explorer's prompt to
+grant your user account access to the protected runtime folder.
+
+An older app can be replaced while a session is stuck: dismiss its error, close
+its UI (Task Manager if needed), then open the complete 0.6.2 app and click
+Disconnect. Do not overwrite only the EXE; its helpers are checksum-pinned.
+
 The controller copies its runtime into `C:\ProgramData\CWG-AppTunnel`, protected
 for SYSTEM and Administrators. A SYSTEM supervisor and independent periodic/startup
 watchdog run from that protected location. Neither runs scripts from a writable

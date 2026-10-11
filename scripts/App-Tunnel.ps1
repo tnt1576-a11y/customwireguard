@@ -27,17 +27,21 @@ function Assert-Runtime {
     if(-not $acl.AreAccessRulesProtected){throw 'The runtime directory has unexpected inherited permissions.'}
     foreach($rule in $acl.Access){if($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18','S-1-5-32-544')){throw 'The runtime directory has unexpected access permissions.'}}
 }
-function Create-Runtime {
-    if(Test-Path $runtime){Assert-Runtime;return}
-    New-Item -ItemType Directory -Path $runtime | Out-Null
-    $acl=New-Object Security.AccessControl.DirectorySecurity
+function Set-PrivateRuntimeAcl([string]$Path,[bool]$Directory) {
+    if($Directory){$acl=New-Object Security.AccessControl.DirectorySecurity;$inheritance='ContainerInherit,ObjectInherit'}
+    else{$acl=New-Object Security.AccessControl.FileSecurity;$inheritance='None'}
     $acl.SetAccessRuleProtection($true,$false)
     foreach($sid in @('S-1-5-18','S-1-5-32-544')){
         $identity=New-Object Security.Principal.SecurityIdentifier($sid)
-        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($identity,'FullControl',$inheritance,'None','Allow')))
     }
     $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
-    Set-Acl -LiteralPath $runtime -AclObject $acl;Assert-Runtime
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+function Create-Runtime {
+    if(Test-Path $runtime){Assert-Runtime;return}
+    New-Item -ItemType Directory -Path $runtime | Out-Null
+    Set-PrivateRuntimeAcl $runtime $true;Assert-Runtime
 }
 function Owned-Process($record){
     if(-not $record){return $null}
@@ -51,11 +55,50 @@ function Stop-Owned($record){
     $p=Owned-Process $record;if(-not $p){return}
     if($record.Path -eq (Join-Path $runtime 'sing-box.exe')){
         $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $signal=Start-Process $ps -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$runtime+'\App-EngineProcess.ps1" -Action Signal -Runtime "'+$runtime+'" -TargetId '+$record.Id+' -ExpectedStart "'+$record.Start+'"') -WindowStyle Hidden -PassThru
+        $signal=Start-Process $ps -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$PSScriptRoot+'\App-EngineProcess.ps1" -Action Signal -Runtime "'+$runtime+'" -TargetId '+$record.Id+' -ExpectedStart "'+$record.Start+'"') -WindowStyle Hidden -PassThru
         if(-not $signal.WaitForExit(5000)){Stop-Process -Id $signal.Id -Force}
         if($p.WaitForExit(5000)){return}
     }
     Stop-Process -Id $p.Id -Force;if(-not $p.WaitForExit(10000)){throw 'A CWG child process could not be stopped.'}
+}
+function Recover-UntrustedRuntime {
+    # Stop from the verified app bundle. Never trust runtime scripts or recorded
+    # process IDs after its ACL has changed, and never loosen startup validation.
+    $expected=[IO.Path]::GetFullPath((Join-Path $env:ProgramData 'CWG-AppTunnel'))
+    if([IO.Path]::GetFullPath($runtime) -ne $expected -or $PSScriptRoot -eq $runtime){throw 'Runtime recovery must run from the app bundle.'}
+    if((Get-Item -LiteralPath $runtime).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'The runtime directory cannot be a link.'}
+    $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$self+'" -Action '
+    $supervisorPattern='(?i)^"?'+[regex]::Escape($ps)+'"?\s+'+[regex]::Escape($arguments)+'(?:Worker|Watchdog)\s*$'
+    $tasks=@(Get-ScheduledTask -TaskName "$task-Worker","$task-Watchdog" -ErrorAction SilentlyContinue)
+    foreach($scheduled in $tasks){
+        if(@($scheduled.Actions).Count -ne 1 -or $scheduled.Actions[0].Execute -ne $ps -or $scheduled.Actions[0].Arguments -notin @(($arguments+'Worker'),($arguments+'Watchdog'))){throw 'A CWG task has unexpected settings; recovery refused.'}
+    }
+    foreach($scheduled in $tasks){$scheduled | Unregister-ScheduledTask -Confirm:$false}
+    foreach($process in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'")){
+        if($process.ExecutablePath -eq $ps -and $process.CommandLine -match $supervisorPattern){
+            $p=Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+            if($p -and $p.Path -eq $ps -and [math]::Abs(($p.StartTime.ToUniversalTime()-$process.CreationDate.ToUniversalTime()).TotalMilliseconds) -lt 1){Stop-Process -Id $p.Id -Force;if(-not $p.WaitForExit(10000)){throw 'CWG supervisor could not be stopped.'}}
+        }
+    }
+    foreach($name in @('sing-box','cwg-app-carrier')){
+        foreach($p in @(Get-Process $name -ErrorAction SilentlyContinue)){
+            if($p.Path -eq (Join-Path $runtime ($name+'.exe'))){Stop-Owned ([pscustomobject]@{Id=$p.Id;Path=$p.Path;Start=$p.StartTime.ToUniversalTime().ToString('o')})}
+        }
+    }
+    # A runtime is flat. Refuse links/directories rather than walking an unknown
+    # tree. Retire the old files, including state, before the next clean start.
+    $files=@(Get-ChildItem -LiteralPath $runtime -Force)
+    if(@($files | Where-Object {$_.PSIsContainer -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)}).Count){throw 'Tunnel stopped, but runtime contains unexpected links or directories. Inspect it before reconnecting.'}
+    Set-PrivateRuntimeAcl $runtime $true
+    foreach($file in $files){Set-PrivateRuntimeAcl $file.FullName $false}
+    $retired=$expected+'.recovered-'+[guid]::NewGuid().ToString('N')
+    if((Split-Path $retired -Parent) -ne (Split-Path $expected -Parent) -or (Test-Path -LiteralPath $retired)){throw 'Invalid runtime recovery destination.'}
+    Move-Item -LiteralPath $expected -Destination $retired
+    Create-Runtime
+    $now=[DateTime]::UtcNow.ToString('o')
+    Write-CwgJson $statePath @{Version=1;Status='Stopped';Message='Disconnected and repaired runtime permissions. Ready to reconnect.';Mode='All';StartedUTC=$now;UpdatedUTC=$now;Restarts=0;Interface='';InterfaceIndex=0;TunnelInterface='';Supervisor=$null;Carrier=$null;Engine=$null;TestDeadlineUTC=''}
+    Write-Output 'Application tunnel stopped; runtime permissions repaired. Previous runtime retained privately for diagnosis.'
 }
 function Spawn-Child([string]$file,[string]$arguments,[string]$log){
     if($file -eq 'cwg-app-carrier.exe'){
@@ -82,7 +125,7 @@ if($Action -eq 'Status'){
 }
 if($Action -eq 'Stop'){
     if(-not (Test-Path $runtime)){Write-Output 'Application tunnel is stopped.';return}
-    Assert-Runtime
+    try{Assert-Runtime}catch{Recover-UntrustedRuntime;return}
     [IO.File]::WriteAllText($stopPath,'stop')
     $s=Get-State
     if($s -and $s.Supervisor){Stop-Owned $s.Supervisor}

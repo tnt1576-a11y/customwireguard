@@ -1387,3 +1387,27 @@ time limit and was stopped afterward. Portable Python tests passed 29 cases;
 profile import tests passed under PowerShell 5.1 and 7, covering data-only
 whitelisting, traversal/duplicate/oversize rejection, private ACLs, malformed
 directives and failed-import cleanup. Go module verification, vet and tests passed.
+# 0.6.2 desktop disconnect recovery (2026-10-11)
+
+The reported stuck disconnect was reproduced as an extra per-user FullControl
+ACE on the protected runtime directory. The old Stop path rejected that ACL
+before cleanup. The affected second PC was recovered without executing its
+runtime scripts, and its normal Ethernet route was verified.
+
+The rebuilt 0.6.2 app was tested on that Windows 10 PC, using the actual app's
+button handlers and embedded helper-hash checks, with independent SYSTEM cleanup.
+Normal Full PC connect/disconnect passed. A second connection deliberately added
+the extra user ACE, replaced the runtime signal helper with a failing marker,
+and substituted an unrelated PowerShell process into the saved supervisor record.
+Disconnect passed, the marker did not execute, the unrelated process survived,
+and the replacement runtime granted access only to SYSTEM and Administrators.
+A third connect and ordinary disconnect then passed. Each connection returned a
+tunnel ping (3/3 total); this was a lifecycle regression, not a performance run.
+
+Final cleanup verified no CWG carrier/engine remained, default route via Ethernet
+17 to 192.168.1.1, DNS 192.168.1.1 and the existing IPv6 binding enabled. Offline
+recovery guards additionally cover unexpected task actions, linked runtime roots
+and child links. App configuration and profile-import checks passed under Windows
+PowerShell 5.1. The build passed Go module verification, vet and all Go tests with
+local loopback networking allowed; the initial sandboxed run could not open test
+sockets. Transport code was not changed for this release.
