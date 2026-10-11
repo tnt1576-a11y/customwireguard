@@ -60,6 +60,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 	poll.Stop()
 	defer poll.Stop()
 	var active *association
+	var grant clientGrant
 	var nextHello, nextPoll, busyUntil time.Time
 	attempt := time.Now()
 	id := wire.NewID()
@@ -68,6 +69,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 	pacer := exchangePacer{}
 	defer stats.ExchangePending.Store(0)
 	defer stats.ExchangeRatePPS.Store(0)
+	defer stats.ExchangeGrantPPS.Store(0)
 	arm := func(now time.Time, delay time.Duration) { nextPoll = now.Add(delay); poll.Reset(delay) }
 	busy := func(now time.Time) {
 		busyUntil = now.Add(2 * time.Second)
@@ -98,6 +100,7 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				flights = new(exchangeFlights)
 				control = newExchangeControl(cfg.ExchangePPS, cfg.ExchangeMaxPPS, now, stats)
 				pacer = exchangePacer{}
+				grant = clientGrant{}
 				stats.ExchangePending.Store(0)
 				id = wire.NewID()
 				attempt = now
@@ -110,7 +113,11 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 				id = wire.NewID()
 				attempt = now
 			}
-			out, e := bootstrap.Seal(wire.Frame{Kind: wire.Hello, ID: id, Timestamp: now.Unix(), Payload: fecBootstrap(cfg.ExchangeFEC)}, wire.RandomBetween(256, 512))
+			capability := fecBootstrap(cfg.ExchangeFEC)
+			if cfg.ExchangeShared {
+				capability = sharedCapability
+			}
+			out, e := bootstrap.Seal(wire.Frame{Kind: wire.Hello, ID: id, Timestamp: now.Unix(), Payload: capability}, wire.RandomBetween(256, 512))
 			if e != nil {
 				return e
 			}
@@ -125,8 +132,15 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			upload.expire(now)
 			control.update(now, upload.length() > 0)
 			rate := control.rate
+			desired := rate
+			if cfg.ExchangeShared {
+				limit := grant.limit(now)
+				rate = min(rate, limit)
+				stats.ExchangeGrantPPS.Store(uint64(limit))
+			}
 			if now.After(busyUntil) && upload.length() == 0 {
 				rate = 4
+				desired = sharedMinimum * 100
 			}
 			stats.ExchangeRatePPS.Store(uint64(rate))
 			count := pacer.ready(now, rate)
@@ -149,7 +163,11 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 					backup = len(payload) > 0
 				}
 				size := wire.RandomBetween(wire.ExchangeMinSize, wire.MaxDatagram)
-				out, e := active.sealSized(wire.Exchange, payload, size, at)
+				body := payload
+				if cfg.ExchangeShared {
+					body = sharedRequest(payload, grant.version, desired, cfg.ExchangeMaxPPS)
+				}
+				out, e := active.sealSized(wire.Exchange, body, size, at)
 				if e != nil {
 					return e
 				}
@@ -194,15 +212,20 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			now := time.Now()
 			if active == nil {
 				f, e := bootstrap.Open(p.data, now)
-				if e != nil || f.Kind != wire.Welcome || f.ID != id || f.Sequence != 0 || len(f.Payload) != 32 || len(p.data) < 256 || len(p.data) > 512 {
+				welcomeSize := 32
+				if cfg.ExchangeShared {
+					welcomeSize = 33
+				}
+				if e != nil || f.Kind != wire.Welcome || f.ID != id || f.Sequence != 0 || len(f.Payload) != welcomeSize || (cfg.ExchangeShared && f.Payload[32] != 1) || len(p.data) < 256 || len(p.data) > 512 {
 					stats.Rejected.Add(1)
 					continue
 				}
-				active, e = newAssociationMode(key, id, f.Payload, true, now, true)
+				active, e = newAssociationMode(key, id, f.Payload[:32], true, now, true)
 				if e != nil {
 					return e
 				}
 				stats.Established.Add(1)
+				active.shared = cfg.ExchangeShared
 				upload.expire(now)
 				upload.rebase(now)
 				upload.maxAge = time.Duration(cfg.ExchangeQueueMS) * time.Millisecond
@@ -226,9 +249,18 @@ func runAdaptiveExchangeClient(ctx context.Context, local, remote *net.UDPConn, 
 			}
 			stats.ExchangePending.Store(uint64(flights.count))
 			stats.ExchangeReplies.Add(1)
-			useful := len(f.Payload) > 9
+			header := 9
+			if cfg.ExchangeShared {
+				header = 12
+				if newest {
+					// Anchor validity to our request's send time. A delayed reply
+					// must not renew a grant after the server may reclaim it.
+					grant.accept(binary.BigEndian.Uint16(f.Payload[9:11]), int(f.Payload[11]), flight.at)
+				}
+			}
+			useful := len(f.Payload) > header
 			control.reply(now, now.Sub(flight.at), useful, f.Payload[8] != 0)
-			delivery.push(f.Sequence, f.Payload[9:], now)
+			delivery.push(f.Sequence, f.Payload[header:], now)
 			if useful {
 				busy(now)
 			} else {

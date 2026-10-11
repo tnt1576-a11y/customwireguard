@@ -35,8 +35,12 @@ see APPLICATION-CLIENT.md for its defined DNS, IPv6 and shutdown behavior.
 Independent-user source, provisioning and sandbox tests are now present; see
 MULTI-USER.md. The first shared-load test exposed oversubscribed client rate
 increases; a diagnostic fixed-rate comparison removed its observed probe loss.
-Coordinated rate control, WAN tests and deployment are still required. Telegram
-support remains unimplemented. Both features remain incomplete until their
+Negotiated rate control now passes local and simulated 90 ms RTT tests with
+1000/1000 probes for both continuing clients and no shared-queue expirations.
+The final three-user WAN candidate returned 6600/6600 probes with no shared-queue
+expirations; see VALIDATION.md for residual outer loss and resource cost. Release
+packaging and deployment remain required. Optional Telegram implementation is
+in progress. Both features remain incomplete until their
 runtime tests and operator-facing deliverables demonstrate completion.
 
 ## Two or three independent users

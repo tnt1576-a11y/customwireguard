@@ -17,6 +17,13 @@ import (
 const multiQueueCapacity = 64
 const multiQueueAge = 5 * time.Millisecond
 
+func multiBudget(pps int) bucket {
+	// Allow a bounded 16 ms arrival batch to pass immediately. WAN packet
+	// compression can group otherwise paced requests; queuing that batch under
+	// a 4 ms allowance caused avoidable expiry at the unchanged 5 ms deadline.
+	return bucket{rate: float64(pps), burst: float64(max(8, pps*16/1000))}
+}
+
 type MultiStats struct {
 	Ingress        Stats
 	Dispatched     atomic.Uint64
@@ -57,12 +64,14 @@ type multiUser struct {
 	addresses []netip.AddrPort
 }
 type userSocket struct {
-	public   *net.UDPConn
-	incoming chan packet
-	closed   chan struct{}
-	once     sync.Once
-	user     *multiUser
-	learns   chan<- multiLearn
+	public    *net.UDPConn
+	incoming  chan packet
+	closed    chan struct{}
+	once      sync.Once
+	user      *multiUser
+	learns    chan<- multiLearn
+	scheduler *sharedScheduler
+	lease     *rateLease
 	// Each of these fields has exactly one owner: the reader pump, or RunServer.
 	arrival time.Time
 	learned netip.AddrPort
@@ -108,6 +117,11 @@ func (s *userSocket) authenticated(addr netip.AddrPort) {
 	default:
 	}
 }
+func (s *userSocket) sharedGrant(now time.Time, ack uint16, desired int, newest bool) (uint16, int) {
+	version, units := s.scheduler.observe(s.lease, now, ack, desired, newest)
+	s.user.stats.ExchangeGrantPPS.Store(uint64(units * 100))
+	return version, units
+}
 
 // RunMultiServer retains the existing authenticated wire format. Unrecognized
 // addresses and short bootstrap packets are tried against at most three bounded
@@ -127,6 +141,7 @@ func RunMultiServer(ctx context.Context, conn *net.UDPConn, initial config.Multi
 	learned := make(chan multiLearn, 128)
 	finished := make(chan multiDone, 6)
 	users := map[string]*multiUser{}
+	scheduler := newSharedScheduler(initial.MaxPPS)
 	var order []*multiUser
 	known := map[netip.AddrPort]*multiUser{}
 	var workers sync.WaitGroup
@@ -156,6 +171,7 @@ func RunMultiServer(ctx context.Context, conn *net.UDPConn, initial config.Multi
 			u.cancel()
 			u.socket.Close()
 			delete(users, name)
+			scheduler.remove(u.socket.lease)
 			for addr, owner := range known {
 				if owner == u {
 					delete(known, addr)
@@ -168,7 +184,7 @@ func RunMultiServer(ctx context.Context, conn *net.UDPConn, initial config.Multi
 			if u == nil {
 				child, stop := context.WithCancel(ctx)
 				u = &multiUser{spec: spec, cancel: stop, stats: new(Stats)}
-				u.socket = &userSocket{public: conn, incoming: make(chan packet, 16), closed: make(chan struct{}), user: u, learns: learned}
+				u.socket = &userSocket{public: conn, incoming: make(chan packet, multiQueueCapacity), closed: make(chan struct{}), user: u, learns: learned, scheduler: scheduler, lease: scheduler.add()}
 				users[spec.Name] = u
 				workers.Add(1)
 				go func(member *multiUser) {
@@ -190,13 +206,14 @@ func RunMultiServer(ctx context.Context, conn *net.UDPConn, initial config.Multi
 		stats.mu.Unlock()
 		stats.Routes.Store(uint64(len(known)))
 		stats.Revision.Store(next.Revision)
+		scheduler.configure(next.MaxPPS)
 		return nil
 	}
 	if err := install(initial); err != nil {
 		return err
 	}
 	unknown := bucket{rate: 100, burst: 100}
-	budget := bucket{rate: float64(initial.MaxPPS), burst: float64(max(8, initial.MaxPPS/250))}
+	budget := multiBudget(initial.MaxPPS)
 	cursor := 0
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
@@ -241,7 +258,7 @@ func RunMultiServer(ctx context.Context, conn *net.UDPConn, initial config.Multi
 				stats.ReloadRejected.Add(1)
 				continue
 			}
-			budget = bucket{rate: float64(next.MaxPPS), burst: float64(max(8, next.MaxPPS/250))}
+			budget = multiBudget(next.MaxPPS)
 			cursor = 0
 		case event := <-learned:
 			if users[event.user.spec.Name] != event.user {
@@ -303,6 +320,12 @@ func dispatchMulti(order []*multiUser, cursor *int, budget *bucket, stats *Multi
 				stats.QueueExpired.Add(1)
 			}
 			if len(u.queue) > 0 {
+				// This event loop is the only sender. A full worker handoff is
+				// temporary backpressure, not a reason to discard a young packet.
+				// Skip it so another ready user can use the current token.
+				if len(u.socket.incoming) == cap(u.socket.incoming) {
+					continue
+				}
 				selected = u
 				selectedIndex = index
 				break

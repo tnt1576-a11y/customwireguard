@@ -34,7 +34,9 @@ It installs the current request/reply profile, keeps the native backend private,
 and exports a private Windows client ZIP. Existing installations are not upgraded
 by this command. The published 0.5.8 installer provisions one client; the 0.6
 development installer and [independent-user management](docs/MULTI-USER.md) are
-under validation, including a remaining shared-rate stability issue.
+under validation. Negotiated shared-rate grants and bounded arrival handling
+passed a three-user WAN comparison with 6600/6600 probes and all four transfers
+verified. Release packaging and final deployment remain in progress.
 Windows application selection is available through the
 [application client](docs/APPLICATION-CLIENT.md). It supports program/folder
 include and exclude rules, using a pinned local routing engine with the existing

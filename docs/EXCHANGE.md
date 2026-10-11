@@ -367,3 +367,45 @@ The real user must run the target-network test. Automated tests use temporary
 localhost endpoints and keys, including real WireGuard with channel TUNs. Legacy
 session/replay probe commands are unavailable in exchange mode; use `probe` and
 the ordinary Windows Start/Diagnose/Stop helpers.
+
+## Shared-rate negotiation (0.6 development)
+
+`exchange_shared: true` requires adaptive exchange, independent credentials and
+`server-multi` on the server. The authenticated HELLO payload is the ASCII marker
+`cwg-share1`. WELCOME contains the existing 32-byte random token followed by a
+one-byte capability marker with value 1. Session derivation uses only the token,
+as before. A shared server rejects legacy HELLO; preflight PROBE remains unchanged.
+
+Shared EXCHANGE payloads begin with four encrypted bytes: acknowledged grant
+version (uint16, big endian), desired rate (uint8), and configured maximum rate
+(uint8). Rate values use units of 100 requests/s, from 2 through 120; desired must
+not exceed maximum. The unchanged native datagram follows at offset 4.
+
+Shared EXCHANGE_REPLY keeps the eight-byte echoed request sequence and one-byte
+`more` flag, then adds a uint16 big-endian grant version and uint8 rate. The native
+datagram follows at offset 12. Empty requests/replies still carry this metadata.
+The maximum 1312-byte native payload still fits within a 1400-byte outer datagram;
+the normal outer size range remains 1400–1440 bytes. There is no clear account ID.
+
+Only newest authenticated requests change server demand or acknowledge a grant.
+Only a newest reply matching an outstanding request changes the client grant.
+The grant expires one second after that request was sent, not one second after
+its reply arrived. The server holds a silent reservation for two seconds. Rate
+reductions retain reserved capacity until acknowledged; increases use capacity
+already free. At most 20 allocation updates per second bound generation changes.
+Version zero is skipped. All three minimum slots are reserved even before all
+accounts exist. A configured aggregate reduction may temporarily leave old
+reservations above the new limit while reductions are acknowledged; the bounded
+server ingress limiter continues to enforce its new dispatch ceiling.
+
+These grants coordinate cooperative clients and do not replace authentication,
+per-user queues, congestion control, or the ingress limiter. An authenticated
+abusive user can still consume network/cryptographic resources. Experimental FEC
+and shared negotiation cannot be enabled together in this version.
+
+Grant capacity is quantized down to 100-request/s units and leaves 10% below the
+hard dispatch ceiling, subject to the three minimum reservations. The dispatch
+token bucket permits up to 16 ms of its configured rate in an immediate burst
+(minimum eight tokens). This handles network-compressed arrivals without adding
+queue time. Worker handoffs hold at most 64 packets, and a full handoff causes the
+fair dispatcher to try another user while retaining the original receive time.

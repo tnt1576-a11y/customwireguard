@@ -63,8 +63,8 @@ func (c MultiServer) Validate() error {
 	if _, err := address(c.Listen, "listen"); err != nil {
 		return err
 	}
-	if c.MaxPPS < 200 || c.MaxPPS > 12000 {
-		return errors.New("aggregate max_pps must be 200..12000")
+	if c.MaxPPS < 600 || c.MaxPPS > 12000 {
+		return errors.New("aggregate max_pps must be 600..12000")
 	}
 	if len(c.Users) > 3 {
 		return errors.New("this server supports at most three independent users")
@@ -77,8 +77,8 @@ func (c MultiServer) Validate() error {
 		if err := u.Config.Validate("server"); err != nil {
 			return err
 		}
-		if u.Config.Listen != c.Listen || u.Config.Transport != "exchange" {
-			return errors.New("each user must use exchange transport and the shared listener")
+		if u.Config.Listen != c.Listen || u.Config.Transport != "exchange" || !u.Config.ExchangeShared {
+			return errors.New("each user must use exchange_shared and the shared listener")
 		}
 		if keys[u.Config.Key] {
 			return errors.New("users must have independent outer credentials")

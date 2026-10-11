@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 )
 
-// One configuration and key pair serves one WireGuard peer. Use separate
-// processes/ports for additional peers to keep association and revocation simple.
+// One configuration and key pair serves one WireGuard peer. MultiServer groups
+// independent configurations behind one shared listener.
 type Config struct {
 	Mode                 string `json:"mode"`
 	Listen               string `json:"listen"`
@@ -35,6 +35,7 @@ type Config struct {
 	ExchangeReorderMS    int    `json:"exchange_reorder_ms,omitempty"`
 	ExchangeRepair       bool   `json:"exchange_repair,omitempty"`
 	ExchangeFEC          bool   `json:"exchange_fec,omitempty"`
+	ExchangeShared       bool   `json:"exchange_shared,omitempty"`
 }
 
 func Load(path string, mode string) (Config, error) {
@@ -118,6 +119,9 @@ func (c Config) Validate(mode string) error {
 	}
 	if c.ExchangeFEC && (c.Transport != "exchange" || c.ExchangeRepair || (mode == "client" && c.ExchangeMaxPPS == 0)) {
 		return errors.New("exchange_fec requires exchange transport, an adaptive client, and exchange_repair disabled")
+	}
+	if c.ExchangeShared && (c.Transport != "exchange" || c.ExchangeFEC || (mode == "client" && c.ExchangeMaxPPS == 0)) {
+		return errors.New("exchange_shared requires exchange transport, an adaptive client, and exchange_fec disabled")
 	}
 	if c.PaceKbps != 0 && (c.PaceKbps < 128 || c.PaceKbps > 100000) {
 		return errors.New("pace_kbps must be zero or 128..100000")

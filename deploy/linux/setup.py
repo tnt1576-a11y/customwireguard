@@ -353,7 +353,7 @@ def install(args):
             path = generated / name
             cfg = json.loads(path.read_text())
             cfg.update(transport='exchange', exchange_queue_ms=60, exchange_burst_ms=350,
-                       exchange_queue_packets=4096, exchange_reorder_ms=2, exchange_repair=True)
+                       exchange_queue_packets=4096, exchange_reorder_ms=2, exchange_repair=True, exchange_shared=True)
             if name == 'client.json':
                 cfg.update(exchange_pps=200, exchange_max_pps=8000)
             else:

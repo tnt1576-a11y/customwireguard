@@ -30,6 +30,11 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 		conn.Close()
 		return err
 	}
+	shared, sharedOK := conn.(sharedSocket)
+	if cfg.ExchangeShared && !sharedOK {
+		conn.Close()
+		return errors.New("exchange_shared server requires the shared listener")
+	}
 	key, _ := cfg.Secret()
 	exchange := cfg.Transport == "exchange"
 	bootstrap, err := codecForMode(key, nil, false, exchange)
@@ -91,6 +96,7 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 		kind    byte
 		expires time.Time
 		fec     bool
+		shared  bool
 	}
 	history := make(map[wire.ID]seenBootstrap)
 	for {
@@ -147,7 +153,18 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 					if !newest {
 						stats.ExchangeReorderedRequests.Add(1)
 					}
-					delivery.push(f.Sequence, f.Payload, now)
+					body := f.Payload
+					var grantVersion uint16
+					var grantUnits int
+					if a.shared {
+						wanted := int(body[2])
+						if downstream.length() >= 16 {
+							wanted = int(body[3])
+						}
+						grantVersion, grantUnits = shared.sharedGrant(now, binary.BigEndian.Uint16(body), wanted, newest)
+						body = body[4:]
+					}
+					delivery.push(f.Sequence, body, now)
 					var payload []byte
 					parity := false
 					if a.fec {
@@ -160,12 +177,20 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 						payload = repair.pop(now)
 						backup = len(payload) > 0
 					}
-					reply := make([]byte, 9+len(payload))
+					header := 9
+					if a.shared {
+						header = 12
+					}
+					reply := make([]byte, header+len(payload))
 					binary.BigEndian.PutUint64(reply[:8], f.Sequence)
 					if downstream.length() > 0 {
 						reply[8] = 1
 					}
-					copy(reply[9:], payload)
+					if a.shared {
+						binary.BigEndian.PutUint16(reply[9:11], grantVersion)
+						reply[11] = byte(grantUnits)
+					}
+					copy(reply[header:], payload)
 					out, e := a.sealSized(wire.ExchangeReply, reply, len(p.data), now)
 					// Exactly one same-size reply, to this request's source. Even
 					// reordered requests never use a different cached destination.
@@ -214,7 +239,8 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 			}
 			f, err = bootstrap.Open(p.data, now)
 			fecRequested := cfg.ExchangeFEC && bytes.Equal(f.Payload, fecCapability)
-			if err != nil || (f.Kind != wire.Hello && f.Kind != wire.Probe) || f.Sequence != 0 || (len(f.Payload) != 0 && !fecRequested) || len(p.data) < 256 || (f.Kind == wire.Hello && len(p.data) > 512) || f.ID == (wire.ID{}) {
+			sharedRequested := cfg.ExchangeShared && f.Kind == wire.Hello && bytes.Equal(f.Payload, sharedCapability)
+			if err != nil || (f.Kind != wire.Hello && f.Kind != wire.Probe) || f.Sequence != 0 || (len(f.Payload) != 0 && !fecRequested && !sharedRequested) || (f.Kind == wire.Hello && cfg.ExchangeShared != sharedRequested) || len(p.data) < 256 || (f.Kind == wire.Hello && len(p.data) > 512) || f.ID == (wire.ID{}) {
 				stats.Rejected.Add(1)
 				continue
 			}
@@ -227,7 +253,7 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 				}
 			}
 			if seen, exists := history[f.ID]; exists {
-				if seen.addr != p.addr || seen.kind != f.Kind || seen.fec != fecRequested || f.Kind == wire.Probe {
+				if seen.addr != p.addr || seen.kind != f.Kind || seen.fec != fecRequested || seen.shared != sharedRequested || f.Kind == wire.Probe {
 					stats.Rejected.Add(1)
 					continue
 				}
@@ -236,7 +262,7 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 					stats.Rejected.Add(1)
 					continue
 				}
-				history[f.ID] = seenBootstrap{p.addr, f.Kind, now.Add(155 * time.Second), fecRequested}
+				history[f.ID] = seenBootstrap{p.addr, f.Kind, now.Add(155 * time.Second), fecRequested, sharedRequested}
 			}
 			learnAuthenticated(conn, p.addr)
 			if f.Kind == wire.Probe {
@@ -265,9 +291,10 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 				}
 				pending.addr = p.addr
 				pending.fec = fecRequested
+				pending.shared = sharedRequested
 				candidate = pending
 			}
-			if candidate.fec != fecRequested {
+			if candidate.fec != fecRequested || candidate.shared != sharedRequested {
 				stats.Rejected.Add(1)
 				continue
 			}
@@ -275,7 +302,11 @@ func RunServer(ctx context.Context, conn datagramSocket, cfg config.Config, stat
 				continue
 			}
 			candidate.lastWelcome = now
-			out, e := bootstrap.Seal(wire.Frame{Kind: wire.Welcome, ID: f.ID, Timestamp: now.Unix(), Payload: candidate.token}, len(p.data))
+			welcome := candidate.token
+			if candidate.shared {
+				welcome = append(append([]byte(nil), welcome...), 1)
+			}
+			out, e := bootstrap.Seal(wire.Frame{Kind: wire.Welcome, ID: f.ID, Timestamp: now.Unix(), Payload: welcome}, len(p.data))
 			if e == nil {
 				send(conn, p.addr, out, stats)
 			}

@@ -1234,3 +1234,58 @@ Final live Windows/Linux amd64 hashes are recorded in release `SHA256SUMS`.
 The Linux service uses the verified release on UDP443, with the unchanged native
 1088-byte MTU. Client settings are 8000 requests/s, 2 ms reorder target and repair
 enabled. The old binary/configuration and a server rollback are preserved.
+
+## 0.6 shared rate and arrival stability (2026-10-11)
+
+Three independent userspace WireGuard devices ran on the separate LAN Windows
+PC, each with its own outer secret, native keys/PSK, address and loopback ports.
+They used the actual WAN path and the same server UDP 443 listener. This did not
+install adapters or change Windows routes/DNS. Each first verified the public
+Internet exit through HTTPS. UDP probes ran at 40/s per user for 55 seconds.
+Three integrity-checked downloads requested 32 MiB at 10 Mbps and 16 MiB each at
+5 Mbps, starting five seconds apart. The first user also uploaded an unpaced
+8 MiB payload. Both machines had independent timed cleanup, and cleanup was
+verified after each run. The existing single-user server was restored afterward.
+
+| Candidate | Application UDP replies | Shared queue expired / dropped | Per-user overall p95 RTT, ms | Burst upload |
+|---|---:|---:|---|---:|
+| Negotiated grants, 4 ms burst allowance | 6586 / 6591 | 1607 / 75 | 100.191 / 104.777 / 111.040 | 30.915 s |
+| 10% grant headroom, preserve blocked worker packets | 6597 / 6599 | 1024 / 10 | 99.372 / 111.773 / 102.324 | 32.765 s |
+| Final: bounded 16 ms arrival burst, 64-packet worker handoff | 6600 / 6600 | 0 / 0 | 109.934 / 103.490 / 102.553 | 7.926 s |
+
+All four transfers in every loaded row passed size and SHA-256 verification.
+An earlier fixture run had a Python module-name collision, so its transfers
+never started. Its 6599/6599 unloaded probes are excluded from loaded claims.
+The failed fixture and each preceding comparison remain in private evidence.
+
+In the final run, all three downloads overlapped for 17.045 seconds. The overlap
+returned 682/682, 682/682 and 681/681 UDP probes, with p95 RTTs of 108.330, 99.240
+and 105.205 ms. Overall maximum RTTs were 124.740, 116.567 and 123.158 ms. The
+preceding first loaded comparison had a simultaneous brief 213–243 ms spike;
+short sequential trials cannot establish that a code change caused every change
+in path latency.
+
+Final client counters recorded 18 outer timeouts in 330,737 requests (0.00544%),
+no original upload queue expirations, one outer session per client and no idle
+resumes. The last active server sample had no native data/control expirations;
+spare repair copies expired while original traffic occupied slots. Later native
+handshake/control expirations after client shutdown are not counted as active
+load failures. There were no shared ingress drops, expirations or unknown drops.
+The nominal native-data queue deadlines and 5 ms shared-ingress deadline were
+unchanged. The final change immediately absorbs a bounded arrival burst rather
+than extending stale-packet retention.
+
+During the final 36.401-second sampled transfer interval, CWG consumed 24.21% of
+one CPU. Total host busy time was 30.94%, including the synthetic HTTP endpoint
+and kernel work; steal was 0.058%. Peak CWG cgroup memory was 11.36 MiB. These
+measurements support this tested three-user, 20 Mbps aggregate download workload
+on the observed one-vCPU server. They do not establish three simultaneous
+maximum-speed users or performance on three different access networks. Outer
+padding and polling still have substantial bandwidth cost. No test here proves
+future DPI invisibility, IP-block prevention or long-term zero loss.
+
+The final source passed the full Go vet/test suite and real IPv4/IPv6 WireGuard
+loopback tests. Focused regressions cover acknowledgement-safe rate borrowing,
+delayed grant expiry, maximum native payloads, rejected legacy negotiation,
+blocked-worker fairness, compressed-arrival dispatch and the unchanged sustained
+rate/deadline limits. The portable installer/account tests also passed.

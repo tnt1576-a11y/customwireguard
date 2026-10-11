@@ -14,8 +14,9 @@ import (
 )
 
 type multiClient struct {
-	conn *net.UDPConn
-	a    *association
+	conn  *net.UDPConn
+	a     *association
+	grant uint16
 }
 
 func openMultiClient(t *testing.T, address *net.UDPAddr, cfg config.Config, existing *net.UDPConn) *multiClient {
@@ -32,7 +33,7 @@ func openMultiClient(t *testing.T, address *net.UDPAddr, cfg config.Config, exis
 	key, _ := cfg.Secret()
 	boot, _ := wire.NewExchangeCodec(key, nil, true)
 	id := wire.NewID()
-	hello, _ := boot.Seal(wire.Frame{Kind: wire.Hello, ID: id, Timestamp: time.Now().Unix()}, 320)
+	hello, _ := boot.Seal(wire.Frame{Kind: wire.Hello, ID: id, Timestamp: time.Now().Unix(), Payload: sharedCapability}, 320)
 	conn.Write(hello)
 	conn.SetReadDeadline(time.Now().Add(time.Second))
 	buf := make([]byte, 2048)
@@ -41,18 +42,19 @@ func openMultiClient(t *testing.T, address *net.UDPAddr, cfg config.Config, exis
 		t.Fatal("multi-user welcome", err)
 	}
 	welcome, err := boot.Open(buf[:n], time.Now())
-	if err != nil || welcome.Kind != wire.Welcome {
+	if err != nil || welcome.Kind != wire.Welcome || len(welcome.Payload) != 33 || welcome.Payload[32] != 1 {
 		t.Fatal("invalid welcome", err)
 	}
-	a, err := newAssociationMode(key, id, welcome.Payload, true, time.Now(), true)
+	a, err := newAssociationMode(key, id, welcome.Payload[:32], true, time.Now(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &multiClient{conn, a}
+	a.shared = true
+	return &multiClient{conn: conn, a: a}
 }
 func (c *multiClient) exchange(t *testing.T, data []byte) []byte {
 	t.Helper()
-	packet, err := c.a.sealSized(wire.Exchange, data, 1407, time.Now())
+	packet, err := c.a.sealSized(wire.Exchange, sharedRequest(data, c.grant, 200, 8000), 1407, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,10 +69,11 @@ func (c *multiClient) exchange(t *testing.T, data []byte) []byte {
 		t.Fatal("multi-user exchange", err)
 	}
 	frame, ok, _ := c.a.open(buf[:n], time.Now())
-	if !ok || frame.Kind != wire.ExchangeReply || len(frame.Payload) < 9 || binary.BigEndian.Uint64(frame.Payload[:8]) != sequence {
+	if !ok || frame.Kind != wire.ExchangeReply || len(frame.Payload) < 12 || binary.BigEndian.Uint64(frame.Payload[:8]) != sequence {
 		t.Fatal("wrong user's response or sequence")
 	}
-	return frame.Payload[9:]
+	c.grant = binary.BigEndian.Uint16(frame.Payload[9:11])
+	return frame.Payload[12:]
 }
 func waitMulti(t *testing.T, condition func() bool) {
 	t.Helper()
@@ -123,13 +126,66 @@ func TestMultiFairDispatchAndAgeLimit(t *testing.T) {
 	}
 }
 
+func TestMultiWorkerBackpressurePreservesYoungPacket(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	a := &multiUser{socket: &userSocket{incoming: make(chan packet, 1)}}
+	b := &multiUser{socket: &userSocket{incoming: make(chan packet, 1)}}
+	a.socket.incoming <- packet{data: []byte("already dispatched"), at: now}
+	a.queue = []packet{{data: []byte("held"), at: now}}
+	b.queue = []packet{{data: []byte("other user"), at: now}}
+	users := []*multiUser{a, b}
+	stats, cursor := new(MultiStats), 0
+	budget := bucket{rate: 8000, burst: 2}
+	if !dispatchMulti(users, &cursor, &budget, stats, now) {
+		t.Fatal("blocked worker lost its pending packet")
+	}
+	if len(a.queue) != 1 || len(b.queue) != 0 || stats.Dispatched.Load() != 1 || budget.tokens != 1 || stats.QueueDropped.Load() != 0 {
+		t.Fatal("worker backpressure dropped data, wasted tokens or blocked another user")
+	}
+	<-a.socket.incoming
+	if dispatchMulti(users, &cursor, &budget, stats, now) || string((<-a.socket.incoming).data) != "held" {
+		t.Fatal("young packet not delivered after worker recovered")
+	}
+	// Keeping a blocked packet must not refresh its original deadline.
+	a.socket.incoming <- packet{at: now}
+	a.queue = []packet{{data: []byte("expires"), at: now}}
+	if dispatchMulti(users, &cursor, &budget, stats, now.Add(6*time.Millisecond)) || stats.QueueExpired.Load() != 1 {
+		t.Fatal("blocked packet outlived the short queue deadline")
+	}
+}
+
+func TestMultiCompressedArrivalKeepsBoundedBudget(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	users := make([]*multiUser, 3)
+	for i := range users {
+		users[i] = &multiUser{socket: &userSocket{incoming: make(chan packet, multiQueueCapacity)}}
+		for j := 0; j < 40; j++ {
+			users[i].queue = append(users[i].queue, packet{at: now})
+		}
+	}
+	stats, cursor, budget := new(MultiStats), 0, multiBudget(8000)
+	dispatchMulti(users, &cursor, &budget, stats, now)
+	if dispatchMulti(users, &cursor, &budget, stats, now) || stats.Dispatched.Load() != 120 || stats.QueueDropped.Load() != 0 {
+		t.Fatal("paced requests compressed into a short batch were needlessly queued or dropped")
+	}
+	// The burst allowance is finite, not a new continuous request rate.
+	for i := 0; i < 8; i++ {
+		if !budget.allow(now) {
+			t.Fatal("incorrect finite burst allowance")
+		}
+	}
+	if budget.allow(now) || !budget.allow(now.Add(125*time.Microsecond)) || budget.allow(now.Add(125*time.Microsecond)) {
+		t.Fatal("hard dispatch rate was relaxed after the bounded burst")
+	}
+}
+
 func TestMultiIsolationRoamingAndRevocation(t *testing.T) {
 	public := socket(t)
 	backends := []*net.UDPConn{socket(t), socket(t), socket(t)}
 	cfg := config.MultiServer{Mode: "server-multi", Listen: public.LocalAddr().String(), MaxPPS: 8000}
 	for i, name := range []string{"alice", "bob", "charlie"} {
 		key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{byte(i + 1)}, 32))
-		cfg.Users = append(cfg.Users, config.ServerUser{Name: name, Config: config.Config{Mode: "server", Transport: "exchange", Listen: cfg.Listen, WireGuard: backends[i].LocalAddr().String(), Key: key, Profile: "balanced"}})
+		cfg.Users = append(cfg.Users, config.ServerUser{Name: name, Config: config.Config{Mode: "server", Transport: "exchange", ExchangeShared: true, Listen: cfg.Listen, WireGuard: backends[i].LocalAddr().String(), Key: key, Profile: "balanced"}})
 	}
 	stats := new(MultiStats)
 	updates := make(chan config.MultiServer)
@@ -214,7 +270,7 @@ func TestMultiIsolationRoamingAndRevocation(t *testing.T) {
 			t.Fatal("reload reset an unaffected session")
 		}
 	}
-	old, _ := clients[1].a.sealSized(wire.Exchange, []byte("revoked"), 1407, time.Now())
+	old, _ := clients[1].a.sealSized(wire.Exchange, sharedRequest([]byte("revoked"), clients[1].grant, 200, 8000), 1407, time.Now())
 	clients[1].conn.Write(old)
 	clients[1].conn.SetReadDeadline(time.Now().Add(40 * time.Millisecond))
 	if _, e = clients[1].conn.Read(buf); e == nil {

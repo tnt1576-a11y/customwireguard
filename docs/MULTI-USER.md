@@ -3,8 +3,10 @@
 The development server has one UDP listener and up to three independent user
 contexts. Each account has its own outer credential, WireGuard keys and tunnel
 address. The deployed 0.5.8 server and published 0.5.8 client packages remain the
-single-user baseline. **Multi-user WAN validation and coordinated client rate
-limits are unfinished; do not treat this development work as the final release.**
+single-user baseline. Negotiated client rate limits now pass local and delayed
+path tests. The final development candidate also passed a three-user WAN load
+comparison. **Release packaging and deployment are still in progress; do not
+treat this development work as the final release.**
 
 ## Provisioning commands
 
@@ -79,8 +81,8 @@ cache. Source-port changes and reuse are covered by regression tests.
 Established input uses round-robin per-user queues, a shared 8,000-request/s
 ceiling and a 5 ms queue deadline. Spare dispatch capacity is borrowed. Tests
 cover equal saturated shares, aggregate pacing, queue expiry and borrowing.
-However, existing clients independently increase their request rates. Three
-clients can temporarily oversubscribe that shared ceiling. The first real
+The first development clients independently increased their request rates and
+could oversubscribe that shared ceiling. The first real
 WireGuard sandbox run recorded 988/1000 and 989/1000 probes for the continuing
 clients, with thousands of outer requests expiring at the shared queue.
 
@@ -91,8 +93,47 @@ The third user was intentionally revoked after six seconds: its first 200 probes
 all returned, later probes stopped, and its interrupted download correctly
 failed. The other native handshake timestamps and outer session counts stayed
 unchanged. These are local validation results, not Internet latency or capacity
-claims. A coordinated-rate design and loaded second-PC WAN comparison remain
-required before deployment.
+claims.
+
+The current development protocol negotiates `exchange_shared` inside the
+authenticated handshake. Each request includes encrypted demand and acknowledgment
+of the current grant. Replies advertise a versioned rate grant. Capacity withdrawn
+from a busy user is held until that user acknowledges the reduction; it is then
+available to another user. Silent clients expire grants after one second, anchored
+to the request's send time, before the server reclaims capacity after two seconds.
+This prevents a delayed reply from renewing a reclaimed grant. Three minimum
+200-request/s reservations allow accounts to join without over-allocation.
+Idle clients still actually poll at four requests/s. Grants leave 10% of the hard
+ceiling available for arrival jitter (except the minimum 600-request/s setup).
+A single busy client can borrow up to 6,800 with an 8,000-request/s hard ceiling;
+three equally busy clients receive 2,400 each. Ordinary congestion control can reduce
+actual rates below those grants. The server's bounded ingress limiter remains.
+
+All three clients may retain an 8,000-request/s configured maximum; the server
+coordinates their usable shares. An incompatible legacy handshake is refused.
+This shared mode currently supports spare-slot repair but not experimental FEC.
+No clear user identifier or larger outer datagram is introduced. See the
+[encrypted exchange framing](EXCHANGE.md#shared-rate-negotiation-06-development).
+
+With negotiated rates, the local three-user test returned 1000/1000 probes for
+both continuing users, verified both independent downloads, and recorded zero
+shared-queue expirations. Repeating with 45 ms delay in each direction returned
+1000/1000 for both, with p95 RTTs of 95.328 and 95.202 ms and zero shared-queue
+expirations. The third user was revoked during both tests without resetting the
+others. The final candidate additionally preserves young requests when a worker
+is busy and permits a bounded 16 ms arrival batch to pass immediately. The shared
+queue still expires after 5 ms; sustained dispatch remains capped at 8,000/s.
+
+The final three-user WAN test returned 6600/6600 application UDP probes and
+verified three downloads (32/16/16 MiB) plus an 8 MiB burst upload. All three
+downloads overlapped for 17.045 seconds; their target aggregate rate was 20 Mbps.
+Overall per-user p95 RTTs were 109.934, 103.490 and 102.553 ms. The shared queue
+recorded zero drops/expirations. The clients still recorded 18 outer timeouts out
+of 330,737 requests (0.00544%); backup repair covered the observed application
+probes, not a promise to recover every future loss. No original native-data or
+control-packet expiry appeared in the last active server sample, and all users
+kept one outer session. Spare repair copies did expire under load, as designed.
+See [full comparison and resource measurements](VALIDATION.md#06-shared-rate-and-arrival-stability-2026-10-11).
 
 Lifecycle tests also cover independent bundle credentials, fourth-user refusal,
 revocation, malformed reload rejection, and interrupted provisioning recovery.

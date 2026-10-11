@@ -15,6 +15,7 @@ import (
 )
 
 type Stats struct {
+	ExchangeGrantPPS atomic.Uint64
 	// Set before starting any readers; immutable for the run. Nil disables it.
 	Trace                      *PacketTrace
 	Established                atomic.Uint64
@@ -80,7 +81,7 @@ type Stats struct {
 }
 
 func (s *Stats) Snapshot() map[string]uint64 {
-	return map[string]uint64{"sessions": s.Established.Load(), "data_sent": s.Sent.Load(),
+	return map[string]uint64{"sessions": s.Established.Load(), "exchange_grant_pps": s.ExchangeGrantPPS.Load(), "data_sent": s.Sent.Load(),
 		"data_received": s.Received.Load(), "rejected": s.Rejected.Load(), "oversize": s.Oversize.Load(),
 		"queue_dropped": s.QueueDropped.Load(), "socket_errors": s.SocketErrors.Load(),
 		"reader_0_dropped": s.ReaderDropped[0].Load(), "reader_1_dropped": s.ReaderDropped[1].Load(),
@@ -220,6 +221,7 @@ func readersSized(ctx context.Context, stats *Stats, capacities []int, conns ...
 type association struct {
 	exchange    bool
 	fec         bool
+	shared      bool
 	id          wire.ID
 	codec       *wire.Codec
 	token       []byte
@@ -276,9 +278,25 @@ func (a *association) open(p []byte, now time.Time) (wire.Frame, bool, bool) {
 		return wire.Frame{}, false, false
 	}
 	if a.exchange {
-		if !((f.Kind == wire.Exchange && len(f.Payload) <= wire.ExchangeMaxPayload && len(p) >= wire.ExchangeMinSize) ||
-			(f.Kind == wire.ExchangeReply && len(f.Payload) >= 9 && len(f.Payload) <= wire.ExchangeMaxPayload+9 && f.Payload[8] <= 1 && len(p) >= wire.ExchangeMinSize)) {
+		requestHeader, replyHeader := 0, 9
+		if a.shared {
+			requestHeader, replyHeader = 4, 12
+		}
+		if !((f.Kind == wire.Exchange && len(f.Payload) >= requestHeader && len(f.Payload) <= wire.ExchangeMaxPayload+requestHeader && len(p) >= wire.ExchangeMinSize) ||
+			(f.Kind == wire.ExchangeReply && len(f.Payload) >= replyHeader && len(f.Payload) <= wire.ExchangeMaxPayload+replyHeader && f.Payload[8] <= 1 && len(p) >= wire.ExchangeMinSize)) {
 			return wire.Frame{}, false, false
+		}
+		if a.shared {
+			units := f.Payload[2]
+			if f.Kind == wire.ExchangeReply {
+				units = f.Payload[11]
+			}
+			if units < sharedMinimum || units > sharedMaximum {
+				return wire.Frame{}, false, false
+			}
+			if f.Kind == wire.Exchange && (f.Payload[3] < units || f.Payload[3] > sharedMaximum) {
+				return wire.Frame{}, false, false
+			}
 		}
 	} else if f.Kind != wire.Data && f.Kind != wire.Ping && f.Kind != wire.Pong {
 		return wire.Frame{}, false, false

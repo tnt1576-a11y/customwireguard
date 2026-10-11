@@ -37,6 +37,7 @@ func TestRealWireGuardIPv4IPv6AndMTU(t *testing.T) {
 	t.Run("fec-with-loss", func(t *testing.T) { testRealWireGuard(t, false, -7, true) })
 	t.Run("fec-server-legacy-client", func(t *testing.T) { testRealWireGuard(t, false, -8, true) })
 	t.Run("fec-burst-loss", func(t *testing.T) { testRealWireGuard(t, false, -9, true) })
+	t.Run("shared-exchange", func(t *testing.T) { testRealWireGuard(t, false, -10, true) })
 }
 
 func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
@@ -115,6 +116,11 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 				clientCfg.ExchangePPS = 200
 				clientCfg.ExchangeQueueMS, serverCfg.ExchangeQueueMS = 500, 500
 			}
+			if pace == -10 {
+				clientCfg.ExchangeShared, serverCfg.ExchangeShared = true, true
+				clientCfg.ExchangeReorderMS, serverCfg.ExchangeReorderMS = 2, 2
+				clientCfg.ExchangeRepair, serverCfg.ExchangeRepair = true, true
+			}
 		}
 	}
 	if h3 {
@@ -143,12 +149,19 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 	defer cancel()
 	done := make(chan error, 2)
 	cs, ss := new(Stats), new(Stats)
+	var multiStats *MultiStats
 	if h3 {
 		go func() { done <- RunH3Client(ctx, local, clientCfg, cs, 0) }()
 		go func() { done <- RunH3Server(ctx, public, serverCfg, ss) }()
 	} else {
 		go func() { done <- RunClient(ctx, local, remote, clientCfg, cs) }()
-		go func() { done <- RunServer(ctx, public, serverCfg, ss) }()
+		if pace == -10 {
+			multiStats = new(MultiStats)
+			multi := config.MultiServer{Mode: "server-multi", Listen: serverCfg.Listen, MaxPPS: 8000, Users: []config.ServerUser{{Name: "native", Config: serverCfg}}}
+			go func() { done <- RunMultiServer(ctx, public, multi, nil, multiStats) }()
+		} else {
+			go func() { done <- RunServer(ctx, public, serverCfg, ss) }()
+		}
 	}
 	defer func() {
 		cancel()
@@ -212,6 +225,14 @@ func testRealWireGuard(t *testing.T, h3 bool, pace int, exchange bool) {
 					}
 				}
 			}
+		}
+	}
+	if multiStats != nil {
+		multiStats.mu.RLock()
+		ss = multiStats.users["native"]
+		multiStats.mu.RUnlock()
+		if ss == nil || cs.ExchangeGrantPPS.Load() == 0 {
+			t.Fatal("shared rate negotiation not exercised")
 		}
 	}
 	if cs.Established.Load() == 0 || ss.Established.Load() == 0 {

@@ -13,7 +13,7 @@ func TestMultiConfigIndependentCredentials(t *testing.T) {
 		}
 		return base64.StdEncoding.EncodeToString(data)
 	}
-	base := Config{Mode: "server", Listen: "127.0.0.1:443", WireGuard: "127.0.0.1:51820", Transport: "exchange", Profile: "balanced", Key: key(1)}
+	base := Config{Mode: "server", Listen: "127.0.0.1:443", WireGuard: "127.0.0.1:51820", Transport: "exchange", ExchangeShared: true, Profile: "balanced", Key: key(1)}
 	c := MultiServer{Mode: "server-multi", Listen: base.Listen, MaxPPS: 8000, Users: []ServerUser{{Name: "alice", Config: base}}}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -31,6 +31,8 @@ func TestMultiConfigIndependentCredentials(t *testing.T) {
 		func(c *MultiServer) { c.Users[1].Config.Transport = "raw" },
 		func(c *MultiServer) { c.Users[1].Config.Listen = "127.0.0.1:444" },
 		func(c *MultiServer) { c.MaxPPS = 12001 },
+		func(c *MultiServer) { c.MaxPPS = 599 },
+		func(c *MultiServer) { c.Users[1].Config.ExchangeShared = false },
 	} {
 		bad := c
 		bad.Users = append([]ServerUser(nil), c.Users...)
