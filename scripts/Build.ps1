@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = '0.6.3')
+param([string]$Version = '0.6.4')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?$') { throw 'Invalid version.' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -14,7 +14,7 @@ function Invoke-Go {
 }
 function Copy-TreeFiles([string]$Directory,[string]$DestinationRoot) {
     $origin=Join-Path $root $Directory
-    Get-ChildItem -LiteralPath $origin -Recurse -File | Where-Object { $_.Extension -in @('.go','.ps1','.py','.sh','.md','.service','.socket','.nft','.example','.cs','.xaml','.manifest') } | ForEach-Object {
+    Get-ChildItem -LiteralPath $origin -Recurse -File | Where-Object { $_.Extension -in @('.go','.ps1','.py','.sh','.md','.service','.socket','.nft','.example','.cs','.xaml','.manifest','.png') } | ForEach-Object {
         $relative=$_.FullName.Substring($root.Length+1)
         $destination=Join-Path $DestinationRoot $relative
         New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
@@ -45,7 +45,9 @@ try {
     }
     foreach ($directory in @('scripts','deploy','docs','examples')) { Copy-TreeFiles $directory $release }
     & (Join-Path $PSScriptRoot 'Build-Desktop.ps1') -BundleRoot $release
-    Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $release
+    foreach ($file in @('README.md','LICENSE','SECURITY.md','CONTRIBUTING.md','THIRD_PARTY.md')) {
+        Copy-Item -LiteralPath (Join-Path $root $file) -Destination $release
+    }
     $licenses=Join-Path $release 'THIRD-PARTY-LICENSES'
     New-Item -ItemType Directory -Path $licenses | Out-Null
     Copy-Item -LiteralPath (Join-Path (Split-Path (Split-Path $go -Parent) -Parent) 'LICENSE') -Destination (Join-Path $licenses 'Go.txt')
@@ -70,7 +72,7 @@ try {
     $sourceDir=$release + '-source'
     New-Item -ItemType Directory -Path $sourceDir | Out-Null
     foreach ($directory in @('cmd','internal','scripts','deploy','docs','examples','desktop')) { Copy-TreeFiles $directory $sourceDir }
-    foreach ($file in @('README.md','go.mod','go.sum','.gitignore')) { Copy-Item -LiteralPath (Join-Path $root $file) -Destination $sourceDir }
+    foreach ($file in @('README.md','LICENSE','SECURITY.md','CONTRIBUTING.md','THIRD_PARTY.md','go.mod','go.sum','.gitignore')) { Copy-Item -LiteralPath (Join-Path $root $file) -Destination $sourceDir }
     $sourceArchive=$sourceDir + '.zip'
     Compress-Archive -LiteralPath $sourceDir -DestinationPath $sourceArchive
     foreach ($zip in @($archive,$sourceArchive)) {

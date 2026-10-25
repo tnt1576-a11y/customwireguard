@@ -1,29 +1,40 @@
-# CWG
+# CWG — customwireguard
 
 CWG is an experimental, UDP-only carrier for WireGuard, with a Windows desktop
-app and a Debian server installer. Each authenticated, encrypted and padded
+app and a Debian server installer. Self-host it on your own server; no public
+VPN service or shared credentials are provided. Each authenticated, encrypted and padded
 client request allows one same-sized server reply. Native WireGuard still
 handles the inner VPN encryption and peer identity.
 
-**Version 0.6.3** reduces carrier buffer allocation while preserving packet
-format, encryption, padding, pacing and repair. Matched Windows 10 trials used
-about 9% less aggregate carrier CPU time with no application probe loss and
-comparable latency; individual results varied. It includes the 0.6.2 disconnect
-recovery fix. Existing servers and profiles work unchanged. See the measured
-[CPU and traffic results](docs/PERFORMANCE.md).
+**Version 0.6.4 is the first public release**, with an MIT license, public setup
+guides and audited source/downloads. It retains the verified 0.6.3 transport and
+disconnect recovery. Existing servers and profiles remain compatible; the
+bandwidth experiment is not enabled. This is experimental software, not a promise
+of undetectable traffic or universal connectivity.
+
+- Windows desktop controls for Full PC or per-application split tunneling.
+- UDP-only authenticated request/reply carrier around native WireGuard.
+- Debian 13 installer, separate user profiles, and optional owner-only Telegram
+  management for up to three active accounts.
+- No personal server details, tokens or preconfigured profiles in public downloads.
+
+![CWG desktop preview with an invented profile and server address](docs/images/desktop-preview.png)
+
+The preview uses invented settings; public downloads start unconfigured.
 
 ## Download
 
-[Release and checksums](https://github.com/tnt1576-a11y/customwireguard/releases/tag/v0.6.3)
+[Release and checksums](https://github.com/tnt1576-a11y/customwireguard/releases/tag/v0.6.4)
 
 | Package | Purpose |
 |---|---|
-| `cwg-windows-0.6.3.zip` | Shareable Windows app and offline routing engine; no account credentials |
-| `cwg-server-0.6.3.zip` | Fresh Linux server installer, binaries, client-export helpers and documentation |
+| `cwg-windows-0.6.4.zip` | Shareable Windows app and offline routing engine; no account credentials |
+| `cwg-server-0.6.4.zip` | Fresh Linux server installer, binaries, client-export helpers and documentation |
 | `*.zip.sha256` | SHA-256 checksum for the matching archive |
 
-This repository is private. GitHub downloads require repository access; an
-administrator can send the original Windows ZIP directly to a user instead.
+Downloads are public. You still need a private profile from your own server
+administrator to connect. Compare the archive's SHA-256 with its `.sha256` file
+before extracting it; on Windows use `Get-FileHash .\cwg-windows-0.6.4.zip`.
 **Share the original ZIP, not an app folder after importing a profile.** Private
 `.cwg` files and server-exported client ZIPs contain connection keys.
 
@@ -31,7 +42,7 @@ administrator can send the original Windows ZIP directly to a user instead.
 
 Requires 64-bit Windows 10/11, .NET Framework 4.8 and administrator permission.
 
-1. Extract **all** of `cwg-windows-0.6.3.zip` into a writable local folder. Keep
+1. Extract **all** of `cwg-windows-0.6.4.zip` into a writable local folder. Keep
    `CWG.exe`, `bin` and `scripts` together.
 2. Double-click **CWG.exe** and accept the administrator prompt.
 3. Click **Import configuration** and select your private `.cwg` file. Each
@@ -55,7 +66,7 @@ See [application behavior and recovery](docs/APPLICATION-CLIENT.md).
 To update, disconnect, extract the new ZIP into a new folder and import your
 existing `.cwg` profile. Do not mix helpers from different releases. If an older
 app cannot disconnect, dismiss its error and close the UI process using Task
-Manager if necessary; open 0.6.3 and click **Disconnect**. It detects the existing
+Manager if necessary; open the new app and click **Disconnect**. It detects the existing
 session without needing another profile import. Do not grant yourself access to
 `C:\ProgramData\CWG-AppTunnel` through Explorer; the app manages that directory.
 
@@ -65,18 +76,17 @@ Use Debian 13 with systemd and amd64 or arm64. The amd64 installer has been
 exercised in Debian 13; arm64 is cross-compiled but not runtime tested. This is
 a **fresh install**, not an upgrade command for an existing CWG server.
 
-Download `cwg-server-0.6.3.zip` and its `.sha256` file from the release, then copy
-both securely to a private server directory. Private GitHub release URLs cannot
-be downloaded anonymously. Run as root:
+Download `cwg-server-0.6.4.zip` and its `.sha256` file from the release, then copy
+both to a private server directory. Run as root:
 
 ```sh
 # If these tools are missing:
 apt-get update
 apt-get install -y python3 unzip
 
-sha256sum -c cwg-server-0.6.3.zip.sha256
-unzip -q cwg-server-0.6.3.zip
-cd cwg-server-0.6.3
+sha256sum -c cwg-server-0.6.4.zip.sha256
+unzip -q cwg-server-0.6.4.zip
+cd cwg-server-0.6.4
 ip -4 route get 1.1.1.1
 ```
 
@@ -150,6 +160,19 @@ and [SSH-only provisioning](docs/MULTI-USER.md).
 [Bandwidth calculations, CPU findings and optimization priorities](docs/PERFORMANCE.md)
 separate measurements from proposals.
 
+## Privacy, support and license
+
+Never attach a `.cwg` profile, a server-generated client ZIP, bot token or raw
+diagnostic capture to an issue. Redact addresses, keys, usernames and local paths.
+See the [security policy](SECURITY.md) for private vulnerability reporting and
+the [public-release audit](docs/PUBLIC-RELEASE.md) for what was checked.
+
+CWG's own source and documentation are under the [MIT license](LICENSE).
+Dependencies retain their own licenses. The bundled sing-box engine is
+GPL-3.0-or-later; see [third-party notices and source links](THIRD_PARTY.md).
+For ordinary bugs, open a sanitized issue; for development, see
+[Contributing](CONTRIBUTING.md).
+
 ## Validation and development
 
 Exact 0.6 transport release comparisons with three accounts returned 6595/6596
@@ -163,7 +186,7 @@ Build in Windows PowerShell with Go available (or `.tools/go/bin/go.exe`) and
 the .NET Framework compiler:
 
 ```powershell
-.\scripts\Build.ps1 -Version 0.6.3
+.\scripts\Build.ps1 -Version 0.6.4
 .\scripts\Package-Desktop.ps1 -Release RELEASE_FOLDER -EngineArchive OFFICIAL_SING_BOX_ZIP -Destination NEW_APP_FOLDER
 ```
 

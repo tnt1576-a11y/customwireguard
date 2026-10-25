@@ -10,7 +10,7 @@ server. It refuses existing CWG files, reserved ports, firewall tables and
 overlapping tunnel networks before touching them. The 0.6 installer
 creates an initial `owner` account and supports separate named accounts; see
 [multi-user status and provisioning](MULTI-USER.md). Coordinated rates and a loaded
-three-user WAN comparison have passed. Use matching 0.6 binaries and source.
+three-user WAN comparison have passed. Use matching release binaries and source.
 Do not share one account's ZIP between simultaneous users.
 
 ## Install

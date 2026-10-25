@@ -16,8 +16,9 @@ and select the `.cwg` file supplied by their administrator through the bot.
 1. Choose **Full PC** to tunnel all apps, or **Split tunnel** with **Only these
    apps use CWG** or **These apps bypass CWG**. Add executables or installation
    folders. Your choices are saved with the profile.
-2. Click **Connect**. On first use the app installs the official routing engine
-   automatically, checking archive and executable SHA-256 against pinned values.
+2. Click **Connect**. The public Windows ZIP includes the verified routing engine
+   and works offline. In server-generated bundles without it, the app installs
+   the official engine, checking archive and executable SHA-256 against pinned values.
    Bundles containing `engine/sing-box-1.14.3-windows-amd64.zip` work without a
    download. No permanent filtering service is installed in this step.
 3. Restart applications whose existing connections need to move. A folder rule
@@ -47,7 +48,8 @@ The app requires 64-bit Windows 10/11 and .NET Framework 4.8. The legacy
 The compact shareable Windows ZIP includes the verified engine ready to run in
 `bin/app-engine`; it needs no first-use download or extraction. It keeps only the
 desktop executable, carrier, engine, required helpers, short instructions and
-checksums. Dependency notices are combined in `THIRD-PARTY-NOTICES.txt`.
+checksums and CWG's `LICENSE`. Dependency notices are combined in
+`THIRD-PARTY-NOTICES.txt`; the separate engine retains its upstream license.
 Build this package with `scripts/Package-Desktop.ps1 -Release RELEASE_FOLDER
 -EngineArchive OFFICIAL_ENGINE_ZIP -Destination NEW_OUTPUT_FOLDER`.
 

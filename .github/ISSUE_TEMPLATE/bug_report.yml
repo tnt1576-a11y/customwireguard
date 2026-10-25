@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a reproducible problem using sanitized details.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach private profiles, server-generated client ZIPs, tokens, keys,
+        server addresses, usernames or raw captures. Report security vulnerabilities
+        through the private reporting link in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: CWG version
+      placeholder: "For example: 0.6.4"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and connection mode
+      placeholder: "For example: Windows 11, Split tunnel; Debian 13 server"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps and observed behavior
+      description: Include the expected result and a minimal, sanitized reproduction.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials and identifying information from this report.
+          required: true

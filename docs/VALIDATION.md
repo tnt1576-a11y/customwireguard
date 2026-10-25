@@ -1405,7 +1405,7 @@ A third connect and ordinary disconnect then passed. Each connection returned a
 tunnel ping (3/3 total); this was a lifecycle regression, not a performance run.
 
 Final cleanup verified no CWG carrier/engine remained, default route via Ethernet
-17 to 192.168.1.1, DNS 192.168.1.1 and the existing IPv6 binding enabled. Offline
+to its original LAN gateway and DNS, with the existing IPv6 binding enabled. Offline
 recovery guards additionally cover unexpected task actions, linked runtime roots
 and child links. App configuration and profile-import checks passed under Windows
 PowerShell 5.1. The build passed Go module verification, vet and all Go tests with
@@ -1446,3 +1446,18 @@ embedded tool hashes were enforced. Independent SYSTEM cleanup restored the
 Ethernet default route, DNS and existing IPv6 binding; the controller's networking
 was not changed. Offline recovery, routing and profile-import checks also passed.
 Profiling harnesses, keys, profiles and raw results are excluded from the app ZIP.
+
+# 0.6.4 public packaging (2026-10-25)
+
+The public preparation retains the 0.6.3 transport. No new WAN-performance
+measurement is claimed. Go module verification, vet and all regression tests
+passed. Portable installer, management and Telegram tests passed 29 cases,
+including preservation of the MIT license in owner and named-user exports.
+Offline Windows routing/recovery and data-only profile import checks passed.
+
+The exact packaged desktop executable rendered its offline preview with an
+invented documentation address; it did not start a tunnel or change networking.
+Release checks verify the embedded helper hashes, all archive manifests, the
+13-file compact app whitelist, dependency notices and installer consumed-file
+integrity for amd64 and arm64. arm64 remains cross-compiled only. The public
+privacy review is described in PUBLIC-RELEASE.md.
