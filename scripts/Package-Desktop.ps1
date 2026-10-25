@@ -17,7 +17,7 @@ foreach($line in [IO.File]::ReadAllLines((Join-Path $releasePath 'SHA256SUMS')))
     if($line -notmatch '^([a-f0-9]{64})  (.+)$'){throw 'Invalid release checksum list.'}
     $sums[$Matches[2]]=$Matches[1]
 }
-$required=@('CWG.exe','bin/cwg-windows-amd64.exe')
+$required=@('CWG.exe','bin/cwg-windows-amd64.exe','LICENSE')
 $required+=@('Desktop-Bridge.ps1','Import-CwgProfile.ps1','App-Tunnel.ps1','App-Tunnel.Common.ps1','App-EngineProcess.ps1','Install-AppEngine.ps1') | ForEach-Object {'scripts/'+$_}
 $licenses=@(Get-ChildItem -LiteralPath (Join-Path $releasePath 'THIRD-PARTY-LICENSES') -File | Sort-Object Name)
 if(-not $licenses.Count){throw 'The release must include dependency licenses.'}
@@ -74,7 +74,8 @@ This shareable app has no account credentials. Each simultaneous device needs it
 Your administrator can create one using /add name in their Telegram bot.
 Keep your .cwg file private. Do not share a folder after importing your profile into it.
 This build is unsigned; obtain it from your trusted administrator.
-License notices and routing-engine source links are in THIRD-PARTY-NOTICES.txt.
+CWG source is MIT-licensed; see LICENSE. Third-party programs retain their own licenses.
+Dependency notices and routing-engine source links are in THIRD-PARTY-NOTICES.txt.
 "@
 [IO.File]::WriteAllText((Join-Path $target 'START-HERE.txt'),$instructions,(New-Object Text.UTF8Encoding($false)))
 $checksums=Get-ChildItem -LiteralPath $target -Recurse -File | Sort-Object FullName | ForEach-Object {

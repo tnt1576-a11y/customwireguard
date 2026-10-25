@@ -21,8 +21,8 @@ using Forms = System.Windows.Forms;
 
 [assembly: AssemblyTitle("CWG Desktop")]
 [assembly: AssemblyProduct("CWG")]
-[assembly: AssemblyVersion("0.6.3.0")]
-[assembly: AssemblyFileVersion("0.6.3.0")]
+[assembly: AssemblyVersion("0.6.4.0")]
+[assembly: AssemblyFileVersion("0.6.4.0")]
 
 namespace Cwg.Desktop {
  internal sealed class AppEntry {

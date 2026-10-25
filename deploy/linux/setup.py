@@ -80,7 +80,7 @@ def release_files(release):
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
     if not arch:
         raise ValueError('This installer requires Linux amd64 or arm64.')
-    required = [f'bin/cwg-linux-{arch}', 'bin/cwg-windows-amd64.exe', 'CWG.exe', 'deploy/linux/cwg.service',
+    required = [f'bin/cwg-linux-{arch}', 'bin/cwg-windows-amd64.exe', 'CWG.exe', 'LICENSE', 'deploy/linux/cwg.service',
                 'deploy/linux/cwg-multi.service', 'deploy/linux/users.py']
     required += ['deploy/linux/' + name for name in ('telegram_admin.py', 'telegram_bot.py', 'telegram_helper.py',
                  'cwg-telegram.service', 'cwg-telegram-admin.socket', 'cwg-telegram-admin@.service')]
@@ -268,7 +268,7 @@ def export_client(state, release, verified):
         raise ValueError('Client export already exists.')
     with zipfile.ZipFile(path, 'x', compression=zipfile.ZIP_DEFLATED) as z:
         for name in verified:
-            if name in ('bin/cwg-windows-amd64.exe', 'CWG.exe') or name.startswith(('scripts/', 'THIRD-PARTY-LICENSES/')):
+            if name in ('bin/cwg-windows-amd64.exe', 'CWG.exe', 'LICENSE') or name.startswith(('scripts/', 'THIRD-PARTY-LICENSES/')):
                 z.write(release / name, 'cwg-client/' + name)
         for name in ('client.json', 'cwg-test.conf', 'cwg-full.conf'):
             z.write(ROOT / 'generated' / name, 'cwg-client/config/' + name)
